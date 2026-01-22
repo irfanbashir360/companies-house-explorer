@@ -32,30 +32,33 @@ export default {
       // Parse the URL
       const url = new URL(request.url);
       
-      // Get the path from query parameter (passed by rewrite)
-      let path = url.searchParams.get('path') || '';
+      // Get the original path from Vercel headers (set during rewrite)
+      // Vercel sets x-vercel-original-url with the original request URL
+      let path = '';
       
-      // If path is not in query params, try to extract from pathname
-      // This handles cases where the rewrite might not work as expected
-      if (!path) {
-        const pathname = url.pathname;
-        // If we're at /api/index, try to get original URL from headers
-        if (pathname === '/api/index' || pathname === '/api') {
-          // Try Vercel headers
-          const originalUrl = request.headers.get('x-vercel-original-url') || 
-                             request.headers.get('x-invoke-path');
-          if (originalUrl) {
-            try {
-              const originalPathname = new URL(originalUrl).pathname;
-              path = originalPathname.replace(/^\/api\//, '');
-            } catch {
-              path = originalUrl.replace(/^\/api\//, '');
-            }
-          }
-        } else {
-          // Direct path extraction
-          path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
+      const originalUrl = request.headers.get('x-vercel-original-url') || 
+                         request.headers.get('x-invoke-path') ||
+                         request.headers.get('x-rewrite-url');
+      
+      if (originalUrl) {
+        try {
+          // If it's a full URL, parse it
+          const originalUrlObj = new URL(originalUrl);
+          path = originalUrlObj.pathname.replace(/^\/api\//, '');
+        } catch {
+          // If it's just a path, use it directly
+          path = originalUrl.replace(/^\/api\//, '');
         }
+      }
+      
+      // Fallback: try to get from query parameter (if rewrite passes it)
+      if (!path) {
+        path = url.searchParams.get('path') || '';
+      }
+      
+      // Last resort: extract from current pathname if we're not at /api/index
+      if (!path && url.pathname !== '/api/index' && url.pathname !== '/api') {
+        path = url.pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
       }
       
       // Remove any trailing slashes
