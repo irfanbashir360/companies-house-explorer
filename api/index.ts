@@ -2,101 +2,57 @@ const API_BASE_URL = 'https://api.company-information.service.gov.uk';
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    // Get API key from environment variable
     const API_KEY = process.env.COMPANIES_HOUSE_API_KEY;
 
     if (!API_KEY) {
       return new Response(
-        JSON.stringify({
-          error: 'API key not configured. Please set COMPANIES_HOUSE_API_KEY in Vercel environment variables.',
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }
+        JSON.stringify({ error: 'API key not configured' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
-    // Only allow GET requests
     if (request.method !== 'GET') {
       return new Response(
         JSON.stringify({ error: 'Method not allowed' }),
-        {
-          status: 405,
-          headers: { 'Content-Type': 'application/json' },
-        }
+        { status: 405, headers: { 'Content-Type': 'application/json' } }
       );
     }
 
     try {
-      // Parse the URL
       const url = new URL(request.url);
       
-      // Get the original path from Vercel headers (set during rewrite)
-      // Vercel sets x-vercel-original-url with the original request URL
-      let path = '';
+      // Simple: get path from query param 'path' or extract from URL
+      let path = url.searchParams.get('path') || '';
       
-      const originalUrl = request.headers.get('x-vercel-original-url') || 
-                         request.headers.get('x-invoke-path') ||
-                         request.headers.get('x-rewrite-url');
-      
-      if (originalUrl) {
-        try {
-          // If it's a full URL, parse it
-          const originalUrlObj = new URL(originalUrl);
-          path = originalUrlObj.pathname.replace(/^\/api\//, '');
-        } catch {
-          // If it's just a path, use it directly
-          path = originalUrl.replace(/^\/api\//, '');
+      // If no path param, try to get from the URL pathname itself
+      // The request might be /api/search/companies directly
+      if (!path) {
+        const pathname = url.pathname;
+        // Remove /api/ prefix
+        if (pathname.startsWith('/api/')) {
+          path = pathname.substring(5); // Remove '/api/'
+        } else if (pathname === '/api') {
+          path = '';
         }
       }
       
-      // Fallback: try to get from query parameter (if rewrite passes it)
-      if (!path) {
-        path = url.searchParams.get('path') || '';
-      }
-      
-      // Last resort: extract from current pathname if we're not at /api/index
-      if (!path && url.pathname !== '/api/index' && url.pathname !== '/api') {
-        path = url.pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
-      }
-      
-      // Remove any trailing slashes
-      path = path.replace(/\/+$/, '');
-      
+      // If still no path, return error with debug info
       if (!path) {
         return new Response(
           JSON.stringify({ 
-            error: 'Invalid API path',
-            debug: {
-              pathname: url.pathname,
-              search: url.search,
-              queryParams: Object.fromEntries(url.searchParams.entries()),
-              url: request.url,
-            }
+            error: 'No API path specified',
+            debug: { pathname: url.pathname, url: request.url, search: url.search }
           }),
-          {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          }
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
       }
 
-      // Build the full URL to Companies House API
+      // Build target URL
       const targetUrl = `${API_BASE_URL}/${path}`;
-      
-      // Forward query parameters from the original request (except 'path' which is our routing param)
-      const searchParams = new URLSearchParams();
-      url.searchParams.forEach((value, key) => {
-        if (key !== 'path') {
-          searchParams.append(key, value);
-        }
-      });
-      
-      const queryString = searchParams.toString();
+      const queryString = url.searchParams.toString().replace(/path=[^&]*&?/g, '').replace(/&$/, '');
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
-      // Make the request to Companies House API
+      // Proxy request
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers: {
@@ -105,38 +61,16 @@ export default {
         },
       });
 
-      // Get response data - handle both JSON and text responses
-      let data;
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        const text = await response.text();
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = { error: text || 'Unknown error', status: response.status };
-        }
-      }
+      const data = await response.json();
 
-      // Forward the status code and data
       return new Response(JSON.stringify(data), {
         status: response.status,
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
     } catch (error: any) {
-      console.error('API Proxy Error:', error);
       return new Response(
-        JSON.stringify({
-          error: 'Internal server error',
-          message: error.message,
-        }),
-        {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }
+        JSON.stringify({ error: 'Internal server error', message: error.message }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
   },
