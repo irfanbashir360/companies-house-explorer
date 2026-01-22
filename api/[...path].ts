@@ -14,12 +14,12 @@ export default {
     try {
       const url = new URL(request.url);
       const pathname = url.pathname;
-      
+
       // Extract the path after /api/
       // e.g., /api/company/12345/officers -> company/12345/officers
       let path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
       path = path.replace(/\/+$/, ''); // Remove trailing slashes
-      
+
       if (!path) {
         return new Response(
           JSON.stringify({ error: 'Invalid API path' }),
@@ -46,7 +46,7 @@ export default {
       // Handle response
       let data;
       const contentType = response.headers.get('content-type') || '';
-      
+
       if (contentType.includes('application/json')) {
         data = await response.json();
       } else {
