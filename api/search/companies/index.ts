@@ -2,8 +2,8 @@ const API_BASE_URL = 'https://api.company-information.service.gov.uk';
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    // Get API key from environment variable
-    const API_KEY = process.env.COMPANIES_HOUSE_API_KEY;
+    // Get API key from environment variable and trim any whitespace
+    const API_KEY = process.env.COMPANIES_HOUSE_API_KEY?.trim();
 
     if (!API_KEY) {
       return new Response(
@@ -19,6 +19,7 @@ export default {
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
       // Create Basic Auth header - Companies House API expects: Basic base64(api_key:)
+      // Make sure there's no extra whitespace in the API key
       const authHeader = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
 
       const response = await fetch(fullUrl, {
