@@ -15,27 +15,24 @@ export default {
       const url = new URL(request.url);
       const pathname = url.pathname;
 
-      // Extract the path after /api/
-      // e.g., /api/company/12345/officers -> company/12345/officers
-      let path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
-      path = path.replace(/\/+$/, ''); // Remove trailing slashes
+      // Extract path after /api/officers/
+      // e.g., /api/officers/12345/appointments -> 12345/appointments
+      let path = pathname.replace(/^\/api\/officers\//, '').replace(/^\/api\/officers$/, '');
+      path = path.replace(/\/+$/, '');
 
       if (!path) {
         return new Response(
-          JSON.stringify({ error: 'Invalid API path' }),
+          JSON.stringify({ error: 'Officer path not provided' }),
           { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
       }
 
-      // Build target URL
-      const targetUrl = `${API_BASE_URL}/${path}`;
+      const targetUrl = `${API_BASE_URL}/officers/${path}`;
       const queryString = url.searchParams.toString();
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
-      // Create auth header
       const authHeader = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
 
-      // Make request to Companies House API
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers: {
@@ -43,7 +40,6 @@ export default {
         },
       });
 
-      // Handle response
       let data;
       const contentType = response.headers.get('content-type') || '';
 

@@ -1,1 +1,12 @@
-{}
+{
+    "rewrites": [
+        {
+            "source": "/api/company/:path*",
+            "destination": "/api/company"
+        },
+        {
+            "source": "/api/officers/:path*",
+            "destination": "/api/officers"
+        }
+    ]
+}
