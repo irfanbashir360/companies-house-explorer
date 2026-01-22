@@ -13,20 +13,45 @@ export default {
 
     try {
       const url = new URL(request.url);
-      // Extract company number from pathname: /api/company/16442064
-      const pathParts = url.pathname.split('/').filter(p => p);
-      // pathParts will be: ['api', 'company', '16442064']
-      const companyNumber = pathParts[2]; // Get the company number
+      
+      // Try to get company number from query param (if rewrite passes it)
+      let companyNumber = url.searchParams.get('companyNumber') || '';
+      
+      // If not in query, extract from pathname
+      if (!companyNumber) {
+        const pathParts = url.pathname.split('/').filter(p => p);
+        // pathParts will be: ['api', 'company', '16442064'] or ['api', 'company']
+        companyNumber = pathParts[2] || '';
+      }
+      
+      // If still not found, try to get from original URL header
+      if (!companyNumber) {
+        const originalUrl = request.headers.get('x-vercel-original-url');
+        if (originalUrl) {
+          try {
+            const originalPathname = new URL(originalUrl).pathname;
+            const parts = originalPathname.split('/').filter(p => p);
+            companyNumber = parts[2] || '';
+          } catch {
+            // If it's just a path
+            const parts = originalUrl.split('/').filter(p => p);
+            companyNumber = parts[2] || '';
+          }
+        }
+      }
       
       if (!companyNumber) {
         return new Response(
-          JSON.stringify({ error: 'Company number not provided' }),
+          JSON.stringify({ 
+            error: 'Company number not provided',
+            debug: { pathname: url.pathname, url: request.url }
+          }),
           { status: 400, headers: { 'Content-Type': 'application/json' } }
         );
       }
 
       const targetUrl = `${API_BASE_URL}/company/${companyNumber}`;
-      const queryString = url.searchParams.toString();
+      const queryString = url.searchParams.toString().replace(/companyNumber=[^&]*&?/g, '').replace(/&$/, '');
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
       const authHeader = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
