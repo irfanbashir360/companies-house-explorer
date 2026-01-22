@@ -29,42 +29,46 @@ export default {
     }
 
     try {
-      // Parse the URL to get path and query parameters
+      // Parse the URL - the rewrite sends requests here, but we need the original path
       const url = new URL(request.url);
       
-      // With Vercel rewrites, the path is passed as a query parameter 'path'
-      // e.g., /api/search/companies becomes /api/proxy?path=search/companies
+      // Try multiple ways to get the original path:
+      // 1. From query parameter (if rewrite passes it)
       let path = url.searchParams.get('path') || '';
       
-      // If path is not in query params, try to extract from the original URL
-      // Vercel might preserve the original pathname
-      if (!path) {
-        // Check if the pathname contains the actual path (before rewrite)
-        const pathname = url.pathname;
-        if (pathname.startsWith('/api/') && pathname !== '/api/proxy') {
-          path = pathname.replace(/^\/api\//, '');
-        }
-      }
-      
-      // Last resort: try to get from headers (Vercel might set these)
+      // 2. From Vercel headers (if available)
       if (!path) {
         const originalUrl = request.headers.get('x-vercel-original-url') || 
-                           request.headers.get('x-invoke-path');
+                           request.headers.get('x-invoke-path') ||
+                           request.headers.get('x-rewrite-path');
         if (originalUrl) {
-          const originalPathname = new URL(originalUrl).pathname;
-          path = originalPathname.replace(/^\/api\//, '');
+          try {
+            const originalPathname = new URL(originalUrl).pathname;
+            path = originalPathname.replace(/^\/api\//, '');
+          } catch {
+            // If it's not a full URL, treat it as a path
+            path = originalUrl.replace(/^\/api\//, '');
+          }
         }
       }
       
+      // 3. If we're at /api/proxy, the rewrite should have passed the path
+      // But if not, we can't determine it - return error with debug info
       if (!path) {
+        // Return debug info to help troubleshoot
+        const debugInfo = {
+          pathname: url.pathname,
+          search: url.search,
+          queryParams: Object.fromEntries(url.searchParams.entries()),
+          headers: Object.fromEntries(request.headers.entries()),
+          url: request.url,
+        };
+        
         return new Response(
           JSON.stringify({ 
-            error: 'Invalid API path - path parameter not found',
-            debug: {
-              pathname: url.pathname,
-              searchParams: Object.fromEntries(url.searchParams.entries()),
-              url: request.url,
-            }
+            error: 'Could not determine API path from request',
+            debug: debugInfo,
+            hint: 'The rewrite should pass the path. Check vercel.json configuration.',
           }),
           {
             status: 400,
