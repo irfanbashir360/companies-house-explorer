@@ -44,7 +44,7 @@ export const SearchBar: React.FC<SearchBarProps> = ({
           setResults(
             data.items.map((item) => ({
               id: item.company_number,
-              name: item.title || item.company_name || `Company ${item.company_number}`,
+              name: item.company_name || `Company ${item.company_number}`,
               type: 'company',
               subtitle: item.address_snippet || '',
               status: item.company_status,

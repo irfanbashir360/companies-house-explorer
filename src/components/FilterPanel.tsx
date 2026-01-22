@@ -9,10 +9,9 @@ import {
   Filter,
 } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
-import type { NodeType } from '../types';
 
 export const FilterPanel: React.FC = () => {
-  const { filters, setFilter, resetFilters } = useGraphStore();
+  const { filters, setFilter } = useGraphStore();
 
   const filterOptions: Array<{
     key: keyof typeof filters;
@@ -59,7 +58,6 @@ export const FilterPanel: React.FC = () => {
     ];
 
   const allEnabled = Object.values(filters).every((v) => v);
-  const allDisabled = Object.values(filters).every((v) => !v);
 
   const toggleAll = () => {
     const newValue = !allEnabled;

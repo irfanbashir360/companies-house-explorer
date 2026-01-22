@@ -194,19 +194,19 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     let isDragging = false;
     let dragStartPos = { x: 0, y: 0 };
 
-    const nodeElements = nodeGroup.selectAll('g')
+    const nodeElements = nodeGroup.selectAll<SVGGElement, SimulationNode>('g')
       .data(simNodes)
       .join('g')
       .attr('cursor', 'grab')
       .call(d3.drag<SVGGElement, SimulationNode>()
-        .on('start', function(event, d) {
+        .on('start', function (event, d) {
           isDragging = false;
           dragStartPos = { x: event.x, y: event.y };
           d3.select(this).attr('cursor', 'grabbing');
           d.fx = d.x;
           d.fy = d.y;
         })
-        .on('drag', function(event, d) {
+        .on('drag', function (event, d) {
           // Check if actually dragging (moved more than 5 pixels)
           const dx = event.x - dragStartPos.x;
           const dy = event.y - dragStartPos.y;
@@ -240,7 +240,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
             .attr('x', link => (link.source.x + link.target.x) / 2)
             .attr('y', link => (link.source.y + link.target.y) / 2);
         })
-        .on('end', function(event, d) {
+        .on('end', function (_event, d) {
           d3.select(this).attr('cursor', 'grab');
           // Keep position fixed permanently
           d.fx = d.x;
@@ -271,7 +271,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .attr('opacity', 0.9);
 
     // Add icons to nodes
-    nodeElements.each(function(d) {
+    nodeElements.each(function (d) {
       const node = d3.select(this);
       const iconSize = NODE_SIZE[d.type] * 0.7; // Increased from 0.5 to 0.7 for bigger icons
 

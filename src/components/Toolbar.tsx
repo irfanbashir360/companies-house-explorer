@@ -1,14 +1,11 @@
 import React, { useRef } from 'react';
 import {
-  Download,
   Upload,
   Trash2,
-  Save,
   Image as ImageIcon,
   FileJson,
 } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
-import * as d3 from 'd3';
 
 export const Toolbar: React.FC = () => {
   const { graphData, clearGraph, exportGraph, importGraph } = useGraphStore();

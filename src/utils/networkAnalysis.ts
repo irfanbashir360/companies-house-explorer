@@ -42,7 +42,7 @@ export function findSharedOfficerConnections(graphData: GraphData): SharedOffice
     });
 
   // For each officer group, find connected companies
-  officersByName.forEach((officers, name) => {
+  officersByName.forEach((officers) => {
     if (officers.length === 1) return; // Only one instance, skip
 
     // Find all companies connected to these officers

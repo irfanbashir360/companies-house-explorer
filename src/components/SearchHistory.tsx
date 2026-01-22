@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Building2, User, X, Trash2 } from 'lucide-react';
+import { Clock, Building2, User, Trash2 } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
 
 interface SearchHistoryProps {

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Network, Play, Settings } from 'lucide-react';
+import { Network, Play } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
-import type { GraphNode } from '../types';
 
 interface ExplorationPanelProps {
     onExplore: (depth: number) => void;
