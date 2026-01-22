@@ -17,6 +17,10 @@ export default {
       const queryString = url.searchParams.toString();
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
+      // Log for debugging
+      console.log('Proxying to:', fullUrl);
+      console.log('API Key present:', !!API_KEY);
+
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers: {
@@ -40,7 +44,12 @@ export default {
         }
       }
 
+      // Log the response for debugging
+      console.log('Response status:', response.status);
+      console.log('Response data:', JSON.stringify(data).substring(0, 200));
+
       // Return the response with the same status code
+      // Include the actual error message from Companies House API
       return new Response(JSON.stringify(data), {
         status: response.status,
         headers: { 'Content-Type': 'application/json' },
@@ -51,7 +60,6 @@ export default {
         JSON.stringify({ 
           error: 'Internal server error', 
           message: error.message,
-          stack: error.stack 
         }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
