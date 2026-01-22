@@ -13,17 +13,17 @@ export default {
 
     try {
       const url = new URL(request.url);
-      
+
       // Try to get company number from query param (if rewrite passes it)
       let companyNumber = url.searchParams.get('companyNumber') || '';
-      
+
       // If not in query, extract from pathname
       if (!companyNumber) {
         const pathParts = url.pathname.split('/').filter(p => p);
         // pathParts will be: ['api', 'company', '16442064'] or ['api', 'company']
         companyNumber = pathParts[2] || '';
       }
-      
+
       // If still not found, try to get from original URL header
       if (!companyNumber) {
         const originalUrl = request.headers.get('x-vercel-original-url');
@@ -39,10 +39,10 @@ export default {
           }
         }
       }
-      
+
       if (!companyNumber) {
         return new Response(
-          JSON.stringify({ 
+          JSON.stringify({
             error: 'Company number not provided',
             debug: { pathname: url.pathname, url: request.url }
           }),
@@ -65,7 +65,7 @@ export default {
 
       let data;
       const contentType = response.headers.get('content-type') || '';
-      
+
       if (contentType.includes('application/json')) {
         data = await response.json();
       } else {
@@ -84,8 +84,8 @@ export default {
     } catch (error: any) {
       console.error('API Proxy Error:', error);
       return new Response(
-        JSON.stringify({ 
-          error: 'Internal server error', 
+        JSON.stringify({
+          error: 'Internal server error',
           message: error.message,
         }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }

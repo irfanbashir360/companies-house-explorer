@@ -20,10 +20,10 @@ export default {
 
     try {
       const url = new URL(request.url);
-      
+
       // Simple: get path from query param 'path' or extract from URL
       let path = url.searchParams.get('path') || '';
-      
+
       // If no path param, try to get from the URL pathname itself
       // The request might be /api/search/companies directly
       if (!path) {
@@ -35,11 +35,11 @@ export default {
           path = '';
         }
       }
-      
+
       // If still no path, return error with debug info
       if (!path) {
         return new Response(
-          JSON.stringify({ 
+          JSON.stringify({
             error: 'No API path specified',
             debug: { pathname: url.pathname, url: request.url, search: url.search }
           }),

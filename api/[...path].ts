@@ -2,7 +2,6 @@ const API_BASE_URL = 'https://api.company-information.service.gov.uk';
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    // Get API key from environment variable and trim any whitespace
     const API_KEY = process.env.COMPANIES_HOUSE_API_KEY?.trim();
 
     if (!API_KEY) {
@@ -14,14 +13,29 @@ export default {
 
     try {
       const url = new URL(request.url);
-      const targetUrl = `${API_BASE_URL}/search/companies`;
+      const pathname = url.pathname;
+      
+      // Extract the path after /api/
+      // e.g., /api/company/12345/officers -> company/12345/officers
+      let path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
+      path = path.replace(/\/+$/, ''); // Remove trailing slashes
+      
+      if (!path) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid API path' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // Build target URL
+      const targetUrl = `${API_BASE_URL}/${path}`;
       const queryString = url.searchParams.toString();
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
-      // Create Basic Auth header - Companies House API expects: Basic base64(api_key:)
-      // Make sure there's no extra whitespace in the API key
+      // Create auth header
       const authHeader = `Basic ${Buffer.from(`${API_KEY}:`).toString('base64')}`;
 
+      // Make request to Companies House API
       const response = await fetch(fullUrl, {
         method: 'GET',
         headers: {
@@ -29,10 +43,10 @@ export default {
         },
       });
 
-      // Handle both success and error responses
+      // Handle response
       let data;
       const contentType = response.headers.get('content-type') || '';
-
+      
       if (contentType.includes('application/json')) {
         data = await response.json();
       } else {
@@ -44,7 +58,6 @@ export default {
         }
       }
 
-      // Return the response with the same status code
       return new Response(JSON.stringify(data), {
         status: response.status,
         headers: { 'Content-Type': 'application/json' },

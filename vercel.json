@@ -1,8 +1,1 @@
-{
-  "rewrites": [
-    {
-      "source": "/api/company/:companyNumber*",
-      "destination": "/api/company/index?companyNumber=:companyNumber*"
-    }
-  ]
-}
+{}
