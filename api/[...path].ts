@@ -29,46 +29,23 @@ export default {
     }
 
     try {
-      // Parse the URL - the rewrite sends requests here, but we need the original path
+      // Parse the URL - for catch-all routes, the pathname should contain the full path
       const url = new URL(request.url);
+      const pathname = url.pathname;
       
-      // Try multiple ways to get the original path:
-      // 1. From query parameter (if rewrite passes it)
-      let path = url.searchParams.get('path') || '';
+      // Extract the path after /api/
+      // e.g., /api/search/companies -> search/companies
+      let path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
       
-      // 2. From Vercel headers (if available)
+      // Remove any trailing slashes
+      path = path.replace(/\/+$/, '');
+      
       if (!path) {
-        const originalUrl = request.headers.get('x-vercel-original-url') || 
-                           request.headers.get('x-invoke-path') ||
-                           request.headers.get('x-rewrite-path');
-        if (originalUrl) {
-          try {
-            const originalPathname = new URL(originalUrl).pathname;
-            path = originalPathname.replace(/^\/api\//, '');
-          } catch {
-            // If it's not a full URL, treat it as a path
-            path = originalUrl.replace(/^\/api\//, '');
-          }
-        }
-      }
-      
-      // 3. If we're at /api/proxy, the rewrite should have passed the path
-      // But if not, we can't determine it - return error with debug info
-      if (!path) {
-        // Return debug info to help troubleshoot
-        const debugInfo = {
-          pathname: url.pathname,
-          search: url.search,
-          queryParams: Object.fromEntries(url.searchParams.entries()),
-          headers: Object.fromEntries(request.headers.entries()),
-          url: request.url,
-        };
-        
         return new Response(
           JSON.stringify({ 
-            error: 'Could not determine API path from request',
-            debug: debugInfo,
-            hint: 'The rewrite should pass the path. Check vercel.json configuration.',
+            error: 'Invalid API path',
+            pathname: pathname,
+            url: request.url,
           }),
           {
             status: 400,
@@ -78,19 +55,10 @@ export default {
       }
 
       // Build the full URL to Companies House API
-      // Ensure path doesn't have leading/trailing slashes
-      const cleanPath = path.replace(/^\/+|\/+$/g, '');
-      const targetUrl = `${API_BASE_URL}/${cleanPath}`;
+      const targetUrl = `${API_BASE_URL}/${path}`;
       
-      // Forward query parameters from the original request (except 'path' which is our routing param)
-      const searchParams = new URLSearchParams();
-      url.searchParams.forEach((value, key) => {
-        if (key !== 'path') {
-          searchParams.append(key, value);
-        }
-      });
-      
-      const queryString = searchParams.toString();
+      // Forward query parameters from the original request
+      const queryString = url.searchParams.toString();
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
       // Make the request to Companies House API
