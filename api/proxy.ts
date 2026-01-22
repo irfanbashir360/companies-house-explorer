@@ -31,16 +31,41 @@ export default {
     try {
       // Parse the URL to get path and query parameters
       const url = new URL(request.url);
-      const pathname = url.pathname;
       
-      // Extract the path after /api/
-      // The catch-all route will have the path in the URL
-      // e.g., /api/search/companies -> path is "search/companies"
-      let path = pathname.replace(/^\/api\//, '').replace(/^\/api$/, '');
+      // With Vercel rewrites, the path is passed as a query parameter 'path'
+      // e.g., /api/search/companies becomes /api/proxy?path=search/companies
+      let path = url.searchParams.get('path') || '';
+      
+      // If path is not in query params, try to extract from the original URL
+      // Vercel might preserve the original pathname
+      if (!path) {
+        // Check if the pathname contains the actual path (before rewrite)
+        const pathname = url.pathname;
+        if (pathname.startsWith('/api/') && pathname !== '/api/proxy') {
+          path = pathname.replace(/^\/api\//, '');
+        }
+      }
+      
+      // Last resort: try to get from headers (Vercel might set these)
+      if (!path) {
+        const originalUrl = request.headers.get('x-vercel-original-url') || 
+                           request.headers.get('x-invoke-path');
+        if (originalUrl) {
+          const originalPathname = new URL(originalUrl).pathname;
+          path = originalPathname.replace(/^\/api\//, '');
+        }
+      }
       
       if (!path) {
         return new Response(
-          JSON.stringify({ error: 'Invalid API path' }),
+          JSON.stringify({ 
+            error: 'Invalid API path - path parameter not found',
+            debug: {
+              pathname: url.pathname,
+              searchParams: Object.fromEntries(url.searchParams.entries()),
+              url: request.url,
+            }
+          }),
           {
             status: 400,
             headers: { 'Content-Type': 'application/json' },
@@ -53,8 +78,14 @@ export default {
       const cleanPath = path.replace(/^\/+|\/+$/g, '');
       const targetUrl = `${API_BASE_URL}/${cleanPath}`;
       
-      // Forward query parameters from the original request
-      const searchParams = url.searchParams;
+      // Forward query parameters from the original request (except 'path' which is our routing param)
+      const searchParams = new URLSearchParams();
+      url.searchParams.forEach((value, key) => {
+        if (key !== 'path') {
+          searchParams.append(key, value);
+        }
+      });
+      
       const queryString = searchParams.toString();
       const fullUrl = queryString ? `${targetUrl}?${queryString}` : targetUrl;
 
