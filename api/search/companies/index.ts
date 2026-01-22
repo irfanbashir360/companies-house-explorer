@@ -25,15 +25,34 @@ export default {
         },
       });
 
-      const data = await response.json();
+      // Handle both success and error responses
+      let data;
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { error: text || 'Unknown error', status: response.status };
+        }
+      }
 
+      // Return the response with the same status code
       return new Response(JSON.stringify(data), {
         status: response.status,
         headers: { 'Content-Type': 'application/json' },
       });
     } catch (error: any) {
+      console.error('API Proxy Error:', error);
       return new Response(
-        JSON.stringify({ error: 'Internal server error', message: error.message }),
+        JSON.stringify({ 
+          error: 'Internal server error', 
+          message: error.message,
+          stack: error.stack 
+        }),
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       );
     }
