@@ -2,6 +2,26 @@
   "name": "companies-house-explorer",
   "private": true,
   "version": "0.0.0",
+  "description": "Interactive graph explorer for UK Companies House relationships, officers, PSCs, and risk signals.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<your-username>/companies-house-explorer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/<your-username>/companies-house-explorer/issues"
+  },
+  "homepage": "https://companies-house-explorer.vercel.app",
+  "keywords": [
+    "companies-house",
+    "graph-visualization",
+    "react",
+    "typescript",
+    "d3",
+    "open-source",
+    "network-analysis",
+    "vercel"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",
