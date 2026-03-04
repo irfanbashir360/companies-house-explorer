@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import type { GraphNode, GraphLink } from '../types';
 import { useGraphStore } from '../store/graphStore';
+import { analyzeNetwork, type ShellCompanyAnalysis } from '../utils/networkAnalysis';
 import { Building2 } from 'lucide-react';
 
 interface NetworkGraphProps {
@@ -20,6 +21,12 @@ interface SimulationNode extends GraphNode {
 interface SimulationLink extends GraphLink {
   source: SimulationNode;
   target: SimulationNode;
+}
+
+interface OverlayLink {
+  source: SimulationNode;
+  target: SimulationNode;
+  label?: string;
 }
 
 const NODE_SIZE = {
@@ -128,6 +135,24 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       return { ...link, source, target };
     });
 
+    // Network analysis: shared officers, shell risk, overlay links
+    const analysis = analyzeNetwork(graphData);
+    const riskMap = new Map<string, ShellCompanyAnalysis>(
+      analysis.shellCompanyRisks.map(r => [r.companyId, r])
+    );
+    const companyIdToNode = new Map(simNodes.filter(n => n.type === 'company').map(n => [n.id, n]));
+    const overlayLinkData: OverlayLink[] = analysis.suspiciousLinks
+      .map((link): OverlayLink | null => {
+        const srcId = typeof link.source === 'string' ? link.source : link.source.id;
+        const tgtId = typeof link.target === 'string' ? link.target : link.target.id;
+        const source = companyIdToNode.get(srcId);
+        const target = companyIdToNode.get(tgtId);
+        if (!source || !target || !filteredNodeIds.has(srcId) || !filteredNodeIds.has(tgtId))
+          return null;
+        return { source, target, label: link.label };
+      })
+      .filter(Boolean) as OverlayLink[];
+
     // Create container for zoom
     const container = svg.append('g');
 
@@ -167,6 +192,21 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     }
 
     simulationRef.current = simulation;
+
+    // Draw shared-officer overlay (red dashed lines) – behind normal links
+    const overlayGroup = container.append('g').attr('class', 'relationship-overlay');
+    const overlayLineElements = overlayGroup
+      .selectAll<SVGLineElement, OverlayLink>('line')
+      .data(overlayLinkData)
+      .join('line')
+      .attr('stroke', '#dc2626')
+      .attr('stroke-width', 2)
+      .attr('stroke-dasharray', '6 4')
+      .attr('stroke-opacity', 0.8)
+      .attr('x1', d => d.source.x)
+      .attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x)
+      .attr('y2', d => d.target.y);
 
     // Draw links
     const linkGroup = container.append('g').attr('class', 'links');
@@ -239,6 +279,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
           linkLabels
             .attr('x', link => (link.source.x + link.target.x) / 2)
             .attr('y', link => (link.source.y + link.target.y) / 2);
+
+          overlayLineElements
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
         })
         .on('end', function (_event, d) {
           d3.select(this).attr('cursor', 'grab');
@@ -262,12 +308,30 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
         })
       );
 
-    // Add circles to nodes
+    // Add circles to nodes (risk-based stroke; selection takes precedence)
+    const getStroke = (d: SimulationNode) => {
+      if (selectedNode?.id === d.id) return '#1e293b';
+      if (d.type !== 'company') return '#ffffff';
+      const r = riskMap.get(d.id);
+      if (!r) return '#ffffff';
+      if (r.riskLevel === 'high') return '#dc2626';
+      if (r.riskLevel === 'medium') return '#ea580c';
+      return '#ffffff';
+    };
+    const getStrokeWidth = (d: SimulationNode) => {
+      if (selectedNode?.id === d.id) return 4;
+      if (d.type !== 'company') return 3;
+      const r = riskMap.get(d.id);
+      if (!r) return 3;
+      if (r.riskLevel === 'high') return 4;
+      if (r.riskLevel === 'medium') return 3;
+      return 3;
+    };
     nodeElements.append('circle')
       .attr('r', d => NODE_SIZE[d.type])
       .attr('fill', d => NODE_COLOR[d.type])
-      .attr('stroke', d => selectedNode?.id === d.id ? '#1e293b' : '#ffffff')
-      .attr('stroke-width', d => selectedNode?.id === d.id ? 4 : 3)
+      .attr('stroke', getStroke)
+      .attr('stroke-width', getStrokeWidth)
       .attr('opacity', 0.9);
 
     // Add icons to nodes
@@ -299,6 +363,27 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
         </svg>
       `;
       icon.node()?.appendChild(div);
+
+      // Risk badge (H/M) for high/medium company risk
+      if (d.type === 'company') {
+        const r = riskMap.get(d.id);
+        if (r && (r.riskLevel === 'high' || r.riskLevel === 'medium')) {
+          const badge = r.riskLevel === 'high' ? 'H' : 'M';
+          const radius = NODE_SIZE[d.type];
+          node
+            .append('text')
+            .attr('class', 'risk-badge')
+            .attr('x', radius * 0.65)
+            .attr('y', -radius * 0.65)
+            .attr('font-size', '11px')
+            .attr('font-weight', '700')
+            .attr('fill', r.riskLevel === 'high' ? '#dc2626' : '#ea580c')
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'middle')
+            .style('pointer-events', 'none')
+            .text(badge);
+        }
+      }
     });
 
     // Add labels
@@ -328,6 +413,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       linkLabels
         .attr('x', d => (d.source.x + d.target.x) / 2)
         .attr('y', d => (d.source.y + d.target.y) / 2);
+
+      overlayLineElements
+        .attr('x1', d => d.source.x)
+        .attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x)
+        .attr('y2', d => d.target.y);
 
       nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
       labels.attr('x', d => d.x).attr('y', d => d.y);
@@ -360,6 +451,12 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .attr('x', d => (d.source.x + d.target.x) / 2)
       .attr('y', d => (d.source.y + d.target.y) / 2);
 
+    overlayLineElements
+      .attr('x1', d => d.source.x)
+      .attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x)
+      .attr('y2', d => d.target.y);
+
     nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
     labels.attr('x', d => d.x).attr('y', d => d.y);
 
@@ -385,20 +482,48 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-6 right-6 bg-white p-4 rounded-xl shadow-xl border border-slate-200">
-        <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Node Types</h3>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: NODE_COLOR.company }} />
-            <span className="text-xs text-slate-700">Company</span>
+      <div className="absolute bottom-6 right-6 bg-white p-4 rounded-xl shadow-xl border border-slate-200 space-y-4">
+        <div>
+          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Node Types</h3>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: NODE_COLOR.company }} />
+              <span className="text-xs text-slate-700">Company</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.officer }} />
+              <span className="text-xs text-slate-700">Officer</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.psc }} />
+              <span className="text-xs text-slate-700">PSC</span>
+            </div>
           </div>
+        </div>
+        <div>
+          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Relationships</h3>
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.officer }} />
-            <span className="text-xs text-slate-700">Officer</span>
+            <svg width="24" height="4" className="flex-shrink-0">
+              <line x1="0" y1="2" x2="24" y2="2" stroke="#dc2626" strokeWidth="2" strokeDasharray="4 3" strokeOpacity="0.8" />
+            </svg>
+            <span className="text-xs text-slate-700">Shared officers</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.psc }} />
-            <span className="text-xs text-slate-700">PSC</span>
+        </div>
+        <div>
+          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Risk (shell analysis)</h3>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border-2 border-red-600" style={{ backgroundColor: NODE_COLOR.company }} />
+              <span className="text-xs text-slate-700">High</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border-2 border-orange-500" style={{ backgroundColor: NODE_COLOR.company }} />
+              <span className="text-xs text-slate-700">Medium</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: NODE_COLOR.company }} />
+              <span className="text-xs text-slate-700">Low</span>
+            </div>
           </div>
         </div>
       </div>

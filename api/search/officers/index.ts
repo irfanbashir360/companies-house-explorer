@@ -1,8 +1,10 @@
+import { getCompaniesHouseApiKey } from '../../_utils/getApiKey.js';
+
 const API_BASE_URL = 'https://api.company-information.service.gov.uk';
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    const API_KEY = process.env.COMPANIES_HOUSE_API_KEY?.trim();
+    const API_KEY = getCompaniesHouseApiKey();
 
     if (!API_KEY) {
       return new Response(

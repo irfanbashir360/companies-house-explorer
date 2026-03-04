@@ -14,9 +14,14 @@ Your `.env.local` file has been created with your API key. This file is gitignor
 4. Click **Add New**
 5. Enter:
    - **Key**: `COMPANIES_HOUSE_API_KEY`
-   - **Value**: `422a7825-57a4-4d33-bb3a-aa6b4b2406ff`
+   - **Value**: `your_companies_house_api_key`
    - **Environment**: Select all (Production, Preview, Development)
 6. Click **Save**
+
+Important:
+- Paste the value as raw text only (no quotes).
+- Do not include `\n` or trailing spaces.
+- Redeploy after changing environment variables.
 
 ### Step 2: Deploy
 

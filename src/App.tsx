@@ -7,6 +7,7 @@ import { Toolbar } from './components/Toolbar';
 import { SearchHistory } from './components/SearchHistory';
 import { ExplorationPanel } from './components/ExplorationPanel';
 import { RelationshipPanel } from './components/RelationshipPanel';
+import { RelationshipAnalysisPanel } from './components/RelationshipAnalysisPanel';
 import { AnalysisPanel } from './components/AnalysisPanel';
 import { useGraphStore } from './store/graphStore';
 import { companiesHouseAPI } from './services/companiesHouse';
@@ -436,6 +437,7 @@ function App() {
             isExploring={isExploring}
           />
           <AnalysisPanel />
+          <RelationshipAnalysisPanel />
           <RelationshipPanel selectedNode={selectedNode} />
           <FilterPanel />
           <SearchHistory
