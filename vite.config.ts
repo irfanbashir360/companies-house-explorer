@@ -16,13 +16,13 @@ export default defineConfig(({ mode }) => {
           rewrite: (path) => path.replace(/^\/api/, ''),
           configure: (proxy, _options) => {
             proxy.on('proxyReq', (proxyReq) => {
-              // Get API key from environment variable
+              // Use server-side env var only (never expose key via VITE_ vars).
               // loadEnv loads from .env, .env.local, .env.[mode], .env.[mode].local
-              const API_KEY = env.VITE_COMPANIES_HOUSE_API_KEY || process.env.VITE_COMPANIES_HOUSE_API_KEY;
+              const API_KEY = env.COMPANIES_HOUSE_API_KEY || process.env.COMPANIES_HOUSE_API_KEY;
 
               if (!API_KEY) {
-                console.error('❌ VITE_COMPANIES_HOUSE_API_KEY not set. API calls will fail.');
-                console.error('Create a .env.local file with: VITE_COMPANIES_HOUSE_API_KEY=your-key');
+                console.error('❌ COMPANIES_HOUSE_API_KEY not set. API calls will fail.');
+                console.error('Create a .env.local file with: COMPANIES_HOUSE_API_KEY=your-key');
                 return;
               }
 

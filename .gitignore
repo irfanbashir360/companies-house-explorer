@@ -28,4 +28,12 @@ dist-ssr
 .env.local
 .env.production.local
 .env.development.local
+.env.*
+!.env.example
+.env.vercel
 .vercel
+
+# Local datasets and generated analysis outputs
+BasicCompanyData-*.csv
+cleaned_*.parquet
+report*.json
