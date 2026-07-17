@@ -6,10 +6,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/<your-username>/companies-house-explorer.git"
+    "url": "https://github.com/irfanbashir360/companies-house-explorer.git"
   },
   "bugs": {
-    "url": "https://github.com/<your-username>/companies-house-explorer/issues"
+    "url": "https://github.com/irfanbashir360/companies-house-explorer/issues"
   },
   "homepage": "https://companies-house-explorer.vercel.app",
   "keywords": [
