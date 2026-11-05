@@ -157,7 +157,8 @@ export interface FilingHistoryItem {
 export interface SearchResult {
   items: Array<{
     company_number: string;
-    company_name: string;
+    // The search API returns the company name as `title`, not `company_name`
+    title: string;
     company_status: string;
     company_type: string;
     address_snippet?: string;

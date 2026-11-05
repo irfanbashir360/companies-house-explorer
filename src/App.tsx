@@ -240,11 +240,13 @@ function App() {
         clearGraph();
 
         const profile = await companiesHouseAPI.getCompanyProfile(companyNumber);
+        // Prefer the official name from the profile over the search result's name
+        const resolvedName = profile.company_name || companyName;
 
         // Place initial company at center
         const companyNode: GraphNode = {
           id: `company-${companyNumber}`,
-          label: companyName,
+          label: resolvedName,
           type: 'company',
           data: profile,
           expanded: false,
@@ -260,12 +262,12 @@ function App() {
         // Add to search history
         addToHistory({
           id: `${Date.now()}-${companyNumber}`,
-          query: companyName,
+          query: resolvedName,
           type: 'company',
           timestamp: Date.now(),
           result: {
             id: companyNumber,
-            name: companyName,
+            name: resolvedName,
           },
         });
       } catch (err: any) {
