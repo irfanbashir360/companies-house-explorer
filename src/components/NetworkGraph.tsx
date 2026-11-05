@@ -335,6 +335,24 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     // Nodes
     let isDragging = false;
     let dragStartPos = { x: 0, y: 0 };
+    // People who move with a dragged company: its officers and PSCs that
+    // aren't linked to any other company (shared people stay where they are)
+    let followers: SimulationNode[] = [];
+    const ownPeople = (company: SimulationNode) => {
+      const neighbours = new Map<string, SimulationNode[]>();
+      simLinks.forEach((l) => {
+        if (!neighbours.has(l.source.id)) neighbours.set(l.source.id, []);
+        if (!neighbours.has(l.target.id)) neighbours.set(l.target.id, []);
+        neighbours.get(l.source.id)!.push(l.target);
+        neighbours.get(l.target.id)!.push(l.source);
+      });
+      return (neighbours.get(company.id) ?? []).filter(
+        (n, i, all) =>
+          n.type !== 'company' &&
+          all.indexOf(n) === i &&
+          (neighbours.get(n.id) ?? []).every((m) => m.type !== 'company' || m.id === company.id)
+      );
+    };
 
     const nodeElements = container
       .append('g')
@@ -380,11 +398,21 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
           d3.select(this).attr('cursor', 'grabbing');
           d.fx = d.x;
           d.fy = d.y;
+          followers = d.type === 'company' ? ownPeople(d) : [];
         })
         .on('drag', function (event, d) {
           if (Math.abs(event.x - dragStartPos.x) > 5 || Math.abs(event.y - dragStartPos.y) > 5) {
             isDragging = true;
           }
+          // Carry the company's own people along by the same amount
+          const dx = event.x - d.x;
+          const dy = event.y - d.y;
+          followers.forEach((n) => {
+            n.x += dx;
+            n.y += dy;
+            n.fx = n.x;
+            n.fy = n.y;
+          });
           d.fx = event.x;
           d.fy = event.y;
           d.x = event.x;
@@ -397,13 +425,19 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
           d.fy = d.y;
 
           if (isDragging) {
-            // A node the user placed by hand stays exactly where they put it
-            livePositions.current.set(d.id, { x: d.x, y: d.y });
-            updateNode(d.id, { x: d.x, y: d.y, fx: d.fx, fy: d.fy, pinned: true });
+            // A node the user placed by hand stays exactly where they put it;
+            // its people keep their new spots too, in the same single update
+            const updates = new Map<string, Partial<GraphNode>>([
+              [d.id, { x: d.x, y: d.y, fx: d.x, fy: d.y, pinned: true }],
+            ]);
+            followers.forEach((n) => updates.set(n.id, { x: n.x, y: n.y, fx: n.x, fy: n.y }));
+            [d, ...followers].forEach((n) => livePositions.current.set(n.id, { x: n.x, y: n.y }));
+            updateNodes(updates);
           } else {
             onNodeClick(d);
           }
           isDragging = false;
+          followers = [];
         })
     );
 
