@@ -132,15 +132,19 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
 
   addLinks: (links) => {
     const { graphData } = get();
-    const existingLinks = new Set(
-      graphData.links.map((l) =>
-        `${typeof l.source === 'string' ? l.source : l.source.id}-${typeof l.target === 'string' ? l.target : l.target.id}`
-      )
-    );
-
+    // A link is the same whichever way round it was found (company -> officer
+    // when opening the company, officer -> company when opening the officer)
+    const key = (l: GraphLink) => {
+      const a = typeof l.source === 'string' ? l.source : l.source.id;
+      const b = typeof l.target === 'string' ? l.target : l.target.id;
+      return a < b ? `${a}|${b}` : `${b}|${a}`;
+    };
+    const seen = new Set(graphData.links.map(key));
     const newLinks = links.filter((l) => {
-      const key = `${typeof l.source === 'string' ? l.source : l.source.id}-${typeof l.target === 'string' ? l.target : l.target.id}`;
-      return !existingLinks.has(key);
+      const k = key(l);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
     });
 
     if (newLinks.length === 0) return;

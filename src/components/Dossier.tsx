@@ -48,7 +48,9 @@ export const Dossier: React.FC<DossierProps> = ({ node: selected, onClose, onExp
         const other = s === node.id ? t : t === node.id ? s : null;
         return other && byId.get(other) ? { node: byId.get(other)!, role: l.label } : null;
       })
-      .filter((c): c is { node: GraphNode; role: string | undefined } => Boolean(c));
+      .filter((c): c is { node: GraphNode; role: string | undefined } => Boolean(c))
+      // One row per connected node, even if older saved networks hold duplicate links
+      .filter((c, i, all) => all.findIndex((o) => o.node.id === c.node.id) === i);
   }, [node, graphData]);
 
   if (!node) return null;
