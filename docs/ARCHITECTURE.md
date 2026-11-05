@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how Companies House Explorer is put together: the layers, the data model, the state store, the analysis heuristics, and the security boundary. For setup and scripts, see the [README](../README.md).
+This document explains how Tracewire is put together: the layers, the data model, the state store, the analysis heuristics, and the security boundary. For setup and scripts, see the [README](../README.md).
 
 ## Design goals
 

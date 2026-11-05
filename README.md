@@ -1,6 +1,6 @@
 <div align="center">
 
-# Companies House Explorer
+# Tracewire
 
 **Interactive graph-based explorer for UK Companies House data** — search companies or officers, expand their relationships, and surface risk signals in connected company networks.
 
@@ -39,7 +39,7 @@
 
 The UK's [Companies House](https://developer.company-information.service.gov.uk/) publishes open data on every registered company, its officers, and its persons with significant control (PSCs). That data is rich but flat — hard to see how entities connect.
 
-**Companies House Explorer** turns it into an explorable graph. Start from any company or officer, expand a node to pull in its relationships on demand, and let the app flag patterns worth a second look — officers shared across many companies, or shell-company risk indicators — directly on the network.
+**Tracewire** turns it into an explorable graph. Start from any company or officer, expand a node to pull in its relationships on demand, and let the app flag patterns worth a second look — officers shared across many companies, or shell-company risk indicators — directly on the network.
 
 ## Screenshots
 

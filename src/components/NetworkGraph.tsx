@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
-import type { GraphNode, GraphLink } from '../types';
+import type { GraphNode, GraphLink, NodeType } from '../types';
 import { useGraphStore } from '../store/graphStore';
 import { analyzeNetwork, type ShellCompanyAnalysis } from '../utils/networkAnalysis';
+import { GRAPH_SVG_ID } from '../utils/layout';
 import { Building2 } from 'lucide-react';
 
 interface NetworkGraphProps {
@@ -29,30 +30,111 @@ interface OverlayLink {
   label?: string;
 }
 
-const NODE_SIZE = {
-  company: 50,
-  officer: 40,
-  psc: 40,
-  charge: 30,
-  filing: 25,
-  establishment: 35,
-} as const;
+// Node radius by type
+const NODE_RADIUS: Record<NodeType, number> = {
+  company: 34,
+  officer: 24,
+  psc: 24,
+  charge: 20,
+  filing: 18,
+  establishment: 24,
+};
 
-const NODE_COLOR = {
-  company: '#1e293b',
+// Fill / icon colours ("refined circles": companies solid, people soft-tinted)
+const NODE_FILL: Record<NodeType, string> = {
+  company: '#0f172a',
+  officer: '#f3e8ff',
+  psc: '#fce7f3',
+  charge: '#fef3c7',
+  filing: '#d1fae5',
+  establishment: '#cffafe',
+};
+const NODE_ACCENT: Record<NodeType, string> = {
+  company: '#ffffff',
   officer: '#9333ea',
   psc: '#ec4899',
   charge: '#f59e0b',
   filing: '#10b981',
   establishment: '#06b6d4',
-} as const;
+};
+const NODE_BORDER: Partial<Record<NodeType, string>> = {
+  officer: '#d8b4fe',
+  psc: '#f9a8d4',
+  charge: '#fcd34d',
+  filing: '#6ee7b7',
+  establishment: '#67e8f9',
+};
+
+const RISK_COLOR = { high: '#dc2626', medium: '#ea580c' } as const;
+const HALO_GAP = 6;
+const HALO_WIDTH = 5;
+
+// Icons drawn on a 24x24 grid
+const ICONS: Partial<Record<NodeType, { paths: string[]; filled: boolean }>> = {
+  company: {
+    filled: false,
+    paths: [
+      'M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z',
+      'M10 22v-4h4v4',
+      'M10 6h.01M14 6h.01M10 10h.01M14 10h.01M10 14h.01M14 14h.01',
+    ],
+  },
+  officer: {
+    filled: true,
+    paths: ['M12 3a4.2 4.2 0 1 1 0 8.4A4.2 4.2 0 0 1 12 3Z', 'M3.5 21a8.5 7.5 0 0 1 17 0Z'],
+  },
+  psc: {
+    filled: true,
+    paths: ['M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'],
+  },
+};
+
+// Split a label into at most two short lines so neighbours' labels don't collide
+const MAX_LINE = 18;
+function wrapLabel(label: string): string[] {
+  const lines: string[] = [];
+  let current = '';
+  for (const word of (label || '').split(/\s+/).filter(Boolean)) {
+    if (!current) current = word;
+    else if (current.length + 1 + word.length <= MAX_LINE) current += ` ${word}`;
+    else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+
+  const clip = (s: string) => s.slice(0, MAX_LINE - 1).trimEnd() + '…';
+  const out = lines.slice(0, 2).map((l) => (l.length > MAX_LINE ? clip(l) : l));
+  if (lines.length > 2 && !out[1].endsWith('…')) out[1] = clip(out[1]);
+  return out;
+}
+
+// Space each node claims in the layout: its circle (plus risk halo) and its label
+const collideRadius = (d: SimulationNode) =>
+  NODE_RADIUS[d.type] + (d.type === 'company' ? 34 : 28);
+
+const linkEndId = (end: string | GraphNode) => (typeof end === 'string' ? end : end.id);
 
 export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const simulationRef = useRef<d3.Simulation<SimulationNode, SimulationLink> | null>(null);
   const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
-  const { graphData, selectedNode, filters, updateNode } = useGraphStore();
+  // Latest on-screen positions, so a layout interrupted by a new expansion
+  // carries on from where nodes actually are rather than jumping back.
+  const livePositions = useRef(new Map<string, { x: number; y: number }>());
+  const { graphData, selectedNode, filters, updateNode, updateNodes } = useGraphStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
+  // Forget positions when the graph is cleared (subscribe fires synchronously,
+  // even when React batches the clear with the next search's first node).
+  useEffect(
+    () =>
+      useGraphStore.subscribe((state) => {
+        if (state.graphData.nodes.length === 0) livePositions.current.clear();
+      }),
+    []
+  );
 
   // Update dimensions
   useEffect(() => {
@@ -96,59 +178,50 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       return filterMap[node.type] ?? true;
     });
 
-    // Check if all nodes have positions
-    const allNodesHavePositions = filteredNodes.every(node =>
-      node.x !== undefined && node.y !== undefined &&
-      node.fx !== null && node.fx !== undefined &&
-      node.fy !== null && node.fy !== undefined
-    );
+    // New (not yet settled) nodes have no fixed position: lay the graph out again.
+    const needsLayout = filteredNodes.some((n) => n.fx == null || n.fy == null);
 
-    // Create simulation nodes - all nodes are FIXED immediately
-    const simNodes: SimulationNode[] = filteredNodes.map(node => {
-      const hasPosition = node.x !== undefined && node.y !== undefined;
-      const x = hasPosition ? node.x! : width / 2 + (Math.random() - 0.5) * 200;
-      const y = hasPosition ? node.y! : height / 2 + (Math.random() - 0.5) * 200;
-
-      return {
-        ...node,
-        x,
-        y,
-        fx: x, // ALWAYS fix position immediately
-        fy: y,
-      };
+    const simNodes: SimulationNode[] = filteredNodes.map((node) => {
+      const live = node.pinned ? undefined : livePositions.current.get(node.id);
+      const x = live?.x ?? node.x ?? width / 2 + (Math.random() - 0.5) * 200;
+      const y = live?.y ?? node.y ?? height / 2 + (Math.random() - 0.5) * 200;
+      // During a layout only pinned nodes stay put; everything else may shift
+      // a little to make room for the new cluster.
+      const fixed = !needsLayout || node.pinned;
+      return { ...node, x, y, fx: fixed ? x : null, fy: fixed ? y : null };
     });
 
-    // Filter links to only include those between visible nodes
-    const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
-    const filteredLinks = links.filter(link => {
-      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
-      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-      return filteredNodeIds.has(sourceId) && filteredNodeIds.has(targetId);
-    });
+    const nodeById = new Map(simNodes.map((n) => [n.id, n]));
+    const filteredNodeIds = new Set(nodeById.keys());
 
-    // Create simulation links
-    const simLinks: SimulationLink[] = filteredLinks.map(link => {
-      const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
-      const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-      const source = simNodes.find(n => n.id === sourceId)!;
-      const target = simNodes.find(n => n.id === targetId)!;
-      return { ...link, source, target };
+    const simLinks: SimulationLink[] = links
+      .filter((l) => filteredNodeIds.has(linkEndId(l.source)) && filteredNodeIds.has(linkEndId(l.target)))
+      .map((l) => ({
+        ...l,
+        source: nodeById.get(linkEndId(l.source))!,
+        target: nodeById.get(linkEndId(l.target))!,
+      }));
+
+    // Number of connections per node: busy companies get a roomier cluster
+    const degree = new Map<string, number>();
+    simLinks.forEach((l) => {
+      degree.set(l.source.id, (degree.get(l.source.id) ?? 0) + 1);
+      degree.set(l.target.id, (degree.get(l.target.id) ?? 0) + 1);
     });
 
     // Network analysis: shared officers, shell risk, overlay links
     const analysis = analyzeNetwork(graphData);
     const riskMap = new Map<string, ShellCompanyAnalysis>(
-      analysis.shellCompanyRisks.map(r => [r.companyId, r])
+      analysis.shellCompanyRisks.map((r) => [r.companyId, r])
     );
-    const companyIdToNode = new Map(simNodes.filter(n => n.type === 'company').map(n => [n.id, n]));
+    const riskLevel = (d: SimulationNode) =>
+      d.type === 'company' ? riskMap.get(d.id)?.riskLevel : undefined;
+
     const overlayLinkData: OverlayLink[] = analysis.suspiciousLinks
       .map((link): OverlayLink | null => {
-        const srcId = typeof link.source === 'string' ? link.source : link.source.id;
-        const tgtId = typeof link.target === 'string' ? link.target : link.target.id;
-        const source = companyIdToNode.get(srcId);
-        const target = companyIdToNode.get(tgtId);
-        if (!source || !target || !filteredNodeIds.has(srcId) || !filteredNodeIds.has(tgtId))
-          return null;
+        const source = nodeById.get(linkEndId(link.source));
+        const target = nodeById.get(linkEndId(link.target));
+        if (!source || !target || source.type !== 'company' || target.type !== 'company') return null;
         return { source, target, label: link.label };
       })
       .filter(Boolean) as OverlayLink[];
@@ -156,44 +229,61 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     // Create container for zoom
     const container = svg.append('g');
 
-    // Setup zoom - preserve transform
-    const zoom = d3.zoom<SVGSVGElement, unknown>()
+    const zoom = d3
+      .zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 4])
       .on('zoom', (event) => {
         transformRef.current = event.transform;
         container.attr('transform', event.transform.toString());
       });
 
-    svg.call(zoom as any);
+    svg.call(zoom);
+    svg.call(zoom.transform, transformRef.current);
 
-    // Apply saved transform
-    svg.call(zoom.transform as any, transformRef.current);
-
-    // Stop any existing simulation
     if (simulationRef.current) {
       simulationRef.current.stop();
     }
 
-    // Create force simulation - only run for new nodes without positions
-    const simulation = d3.forceSimulation<SimulationNode>(simNodes)
-      .force('link', d3.forceLink<SimulationNode, SimulationLink>(simLinks)
-        .id(d => d.id)
-        .distance(150))
-      .force('charge', d3.forceManyBody().strength(-400))
-      .force('center', d3.forceCenter(width / 2, height / 2))
-      .force('collision', d3.forceCollide<SimulationNode>().radius(d => NODE_SIZE[d.type] + 10));
+    // Natural clusters: links hold each company's people near it, charge pushes
+    // clusters apart, collision keeps circles and labels from overlapping.
+    const simulation = d3
+      .forceSimulation<SimulationNode>(simNodes)
+      .force(
+        'link',
+        d3
+          .forceLink<SimulationNode, SimulationLink>(simLinks)
+          .id((d) => d.id)
+          .distance((l) => {
+            const hub = Math.max(degree.get(l.source.id) ?? 1, degree.get(l.target.id) ?? 1);
+            return 80 + 10 * Math.sqrt(hub);
+          })
+      )
+      .force(
+        'charge',
+        d3
+          .forceManyBody<SimulationNode>()
+          .strength((d) => (d.type === 'company' ? -600 : -250))
+          .distanceMax(700)
+      )
+      .force('collision', d3.forceCollide<SimulationNode>().radius(collideRadius).strength(1).iterations(3));
 
-    // If all nodes have positions, stop simulation immediately
-    if (allNodesHavePositions) {
-      simulation.alpha(0).stop();
+    // Without any pinned anchor, gently hold the graph in view
+    if (!simNodes.some((n) => n.pinned)) {
+      simulation
+        .force('x', d3.forceX<SimulationNode>(width / 2).strength(0.02))
+        .force('y', d3.forceY<SimulationNode>(height / 2).strength(0.02));
+    }
+
+    if (needsLayout) {
+      // Settle in roughly a second and a half, then freeze
+      simulation.alpha(0.8).alphaDecay(0.05).alphaMin(0.01).velocityDecay(0.35);
     } else {
-      // Run briefly for new nodes, then stop
-      simulation.alpha(0.3).alphaDecay(0.1);
+      simulation.alpha(0).stop();
     }
 
     simulationRef.current = simulation;
 
-    // Draw shared-officer overlay (red dashed lines) – behind normal links
+    // Shared-officer overlay (red dashed lines) – behind normal links
     const overlayGroup = container.append('g').attr('class', 'relationship-overlay');
     const overlayLineElements = overlayGroup
       .selectAll<SVGLineElement, OverlayLink>('line')
@@ -202,43 +292,78 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .attr('stroke', '#dc2626')
       .attr('stroke-width', 2)
       .attr('stroke-dasharray', '6 4')
-      .attr('stroke-opacity', 0.8)
-      .attr('x1', d => d.source.x)
-      .attr('y1', d => d.source.y)
-      .attr('x2', d => d.target.x)
-      .attr('y2', d => d.target.y);
+      .attr('stroke-opacity', 0.7);
 
-    // Draw links
-    const linkGroup = container.append('g').attr('class', 'links');
-    const linkElements = linkGroup.selectAll('line')
+    // Links
+    const linkElements = container
+      .append('g')
+      .attr('class', 'links')
+      .selectAll<SVGLineElement, SimulationLink>('line')
       .data(simLinks)
       .join('line')
       .attr('stroke', '#cbd5e1')
-      .attr('stroke-width', 2)
-      .attr('stroke-opacity', 0.6);
+      .attr('stroke-width', 1.5)
+      .attr('stroke-opacity', 0.8);
 
-    // Draw link labels
-    const linkLabelGroup = container.append('g').attr('class', 'link-labels');
-    const linkLabels = linkLabelGroup.selectAll('text')
+    // Link labels (role), with a white outline so they stay legible over lines
+    const linkLabels = container
+      .append('g')
+      .attr('class', 'link-labels')
+      .selectAll<SVGTextElement, SimulationLink>('text')
       .data(simLinks)
       .join('text')
-      .attr('font-size', '10px')
-      .attr('fill', '#64748b')
+      .attr('font-size', '9px')
+      .attr('fill', '#94a3b8')
       .attr('text-anchor', 'middle')
-      .text(d => d.label || '');
+      .attr('dominant-baseline', 'middle')
+      .attr('stroke', '#ffffff')
+      .attr('stroke-width', 3)
+      .attr('paint-order', 'stroke')
+      .attr('pointer-events', 'none')
+      .text((d) => d.label || '');
 
-    // Draw nodes
-    const nodeGroup = container.append('g').attr('class', 'nodes');
-
-    // Track if node was dragged
+    // Nodes
     let isDragging = false;
     let dragStartPos = { x: 0, y: 0 };
 
-    const nodeElements = nodeGroup.selectAll<SVGGElement, SimulationNode>('g')
+    const nodeElements = container
+      .append('g')
+      .attr('class', 'nodes')
+      .selectAll<SVGGElement, SimulationNode>('g')
       .data(simNodes)
       .join('g')
-      .attr('cursor', 'grab')
-      .call(d3.drag<SVGGElement, SimulationNode>()
+      .attr('cursor', 'grab');
+
+    // Labels are drawn after nodes so they sit on top of neighbouring circles
+    const labels = container
+      .append('g')
+      .attr('class', 'labels')
+      .selectAll<SVGGElement, SimulationNode>('g')
+      .data(simNodes)
+      .join('g')
+      .attr('pointer-events', 'none');
+
+    const updatePositions = () => {
+      linkElements
+        .attr('x1', (d) => d.source.x)
+        .attr('y1', (d) => d.source.y)
+        .attr('x2', (d) => d.target.x)
+        .attr('y2', (d) => d.target.y);
+      linkLabels
+        .attr('x', (d) => (d.source.x + d.target.x) / 2)
+        .attr('y', (d) => (d.source.y + d.target.y) / 2);
+      overlayLineElements
+        .attr('x1', (d) => d.source.x)
+        .attr('y1', (d) => d.source.y)
+        .attr('x2', (d) => d.target.x)
+        .attr('y2', (d) => d.target.y);
+      nodeElements.attr('transform', (d) => `translate(${d.x},${d.y})`);
+      labels.attr('transform', (d) => `translate(${d.x},${d.y})`);
+    };
+
+    nodeElements.call(
+      d3
+        .drag<SVGGElement, SimulationNode>()
         .on('start', function (event, d) {
           isDragging = false;
           dragStartPos = { x: event.x, y: event.y };
@@ -247,229 +372,136 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
           d.fy = d.y;
         })
         .on('drag', function (event, d) {
-          // Check if actually dragging (moved more than 5 pixels)
-          const dx = event.x - dragStartPos.x;
-          const dy = event.y - dragStartPos.y;
-          if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+          if (Math.abs(event.x - dragStartPos.x) > 5 || Math.abs(event.y - dragStartPos.y) > 5) {
             isDragging = true;
           }
-
-          // Update position during drag
           d.fx = event.x;
           d.fy = event.y;
           d.x = event.x;
           d.y = event.y;
-
-          // Manually update positions without simulation
-          d3.select(this).attr('transform', `translate(${d.x},${d.y})`);
-
-          // Update label position
-          labelGroup.selectAll('text')
-            .filter((n: any) => n.id === d.id)
-            .attr('x', d.x)
-            .attr('y', d.y);
-
-          // Update connected links
-          linkElements
-            .attr('x1', link => link.source.x)
-            .attr('y1', link => link.source.y)
-            .attr('x2', link => link.target.x)
-            .attr('y2', link => link.target.y);
-
-          linkLabels
-            .attr('x', link => (link.source.x + link.target.x) / 2)
-            .attr('y', link => (link.source.y + link.target.y) / 2);
-
-          overlayLineElements
-            .attr('x1', d => d.source.x)
-            .attr('y1', d => d.source.y)
-            .attr('x2', d => d.target.x)
-            .attr('y2', d => d.target.y);
+          updatePositions();
         })
         .on('end', function (_event, d) {
           d3.select(this).attr('cursor', 'grab');
-          // Keep position fixed permanently
           d.fx = d.x;
           d.fy = d.y;
 
-          // Save position to store
-          updateNode(d.id, {
-            x: d.x,
-            y: d.y,
-            fx: d.fx,
-            fy: d.fy,
-          });
-
-          // If not dragged, treat as click
-          if (!isDragging) {
+          if (isDragging) {
+            // A node the user placed by hand stays exactly where they put it
+            livePositions.current.set(d.id, { x: d.x, y: d.y });
+            updateNode(d.id, { x: d.x, y: d.y, fx: d.fx, fy: d.fy, pinned: true });
+          } else {
             onNodeClick(d);
           }
           isDragging = false;
         })
-      );
+    );
 
-    // Add circles to nodes (risk-based stroke; selection takes precedence)
-    const getStroke = (d: SimulationNode) => {
-      if (selectedNode?.id === d.id) return '#1e293b';
-      if (d.type !== 'company') return '#ffffff';
-      const r = riskMap.get(d.id);
-      if (!r) return '#ffffff';
-      if (r.riskLevel === 'high') return '#dc2626';
-      if (r.riskLevel === 'medium') return '#ea580c';
-      return '#ffffff';
-    };
-    const getStrokeWidth = (d: SimulationNode) => {
-      if (selectedNode?.id === d.id) return 4;
-      if (d.type !== 'company') return 3;
-      const r = riskMap.get(d.id);
-      if (!r) return 3;
-      if (r.riskLevel === 'high') return 4;
-      if (r.riskLevel === 'medium') return 3;
-      return 3;
-    };
-    nodeElements.append('circle')
-      .attr('r', d => NODE_SIZE[d.type])
-      .attr('fill', d => NODE_COLOR[d.type])
-      .attr('stroke', getStroke)
-      .attr('stroke-width', getStrokeWidth)
-      .attr('opacity', 0.9);
+    // Selection ring
+    nodeElements
+      .filter((d) => selectedNode?.id === d.id)
+      .append('circle')
+      .attr('r', (d) => NODE_RADIUS[d.type] + (d.type === 'company' ? HALO_GAP + HALO_WIDTH + 4 : 6))
+      .attr('fill', 'none')
+      .attr('stroke', '#0f172a')
+      .attr('stroke-width', 2);
 
-    // Add icons to nodes
+    // Company halo: faint for low risk, solid red for high, dashed orange for medium
+    nodeElements
+      .filter((d) => d.type === 'company')
+      .append('circle')
+      .attr('r', (d) => NODE_RADIUS[d.type] + HALO_GAP)
+      .attr('fill', 'none')
+      .attr('stroke', (d) => {
+        const level = riskLevel(d);
+        return level === 'high' || level === 'medium' ? RISK_COLOR[level] : '#0f172a';
+      })
+      .attr('stroke-opacity', (d) => {
+        const level = riskLevel(d);
+        return level === 'high' || level === 'medium' ? 1 : 0.12;
+      })
+      .attr('stroke-width', HALO_WIDTH)
+      .attr('stroke-dasharray', (d) => (riskLevel(d) === 'medium' ? '8 4' : null));
+
+    // Main circle
+    nodeElements
+      .append('circle')
+      .attr('r', (d) => NODE_RADIUS[d.type])
+      .attr('fill', (d) => NODE_FILL[d.type])
+      .attr('stroke', (d) => NODE_BORDER[d.type] ?? 'none')
+      .attr('stroke-width', 1.5);
+
+    // Icon
     nodeElements.each(function (d) {
-      const node = d3.select(this);
-      const iconSize = NODE_SIZE[d.type] * 0.7; // Increased from 0.5 to 0.7 for bigger icons
-
-      const icon = node.append('foreignObject')
-        .attr('width', iconSize * 2)
-        .attr('height', iconSize * 2)
-        .attr('x', -iconSize)
-        .attr('y', -iconSize)
-        .style('pointer-events', 'none');
-
-      const div = document.createElement('div');
-      div.style.cssText = `
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-        color: white;
-      `;
-      div.innerHTML = `
-        <svg width="${iconSize}" height="${iconSize}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          ${d.type === 'company' ? '<rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/>' : ''}
-          ${d.type === 'officer' ? '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>' : ''}
-          ${d.type === 'psc' ? '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>' : ''}
-        </svg>
-      `;
-      icon.node()?.appendChild(div);
-
-      // Risk badge (H/M) for high/medium company risk
-      if (d.type === 'company') {
-        const r = riskMap.get(d.id);
-        if (r && (r.riskLevel === 'high' || r.riskLevel === 'medium')) {
-          const badge = r.riskLevel === 'high' ? 'H' : 'M';
-          const radius = NODE_SIZE[d.type];
-          node
-            .append('text')
-            .attr('class', 'risk-badge')
-            .attr('x', radius * 0.65)
-            .attr('y', -radius * 0.65)
-            .attr('font-size', '11px')
-            .attr('font-weight', '700')
-            .attr('fill', r.riskLevel === 'high' ? '#dc2626' : '#ea580c')
-            .attr('text-anchor', 'middle')
-            .attr('dominant-baseline', 'middle')
-            .style('pointer-events', 'none')
-            .text(badge);
+      const icon = ICONS[d.type];
+      if (!icon) return;
+      const size = NODE_RADIUS[d.type] * (d.type === 'company' ? 1.0 : 1.05);
+      const g = d3
+        .select(this)
+        .append('g')
+        .attr('transform', `translate(${-size / 2},${-size / 2}) scale(${size / 24})`)
+        .attr('pointer-events', 'none');
+      icon.paths.forEach((p) => {
+        const path = g.append('path').attr('d', p);
+        if (icon.filled) {
+          path.attr('fill', NODE_ACCENT[d.type]);
+        } else {
+          path
+            .attr('fill', 'none')
+            .attr('stroke', NODE_ACCENT[d.type])
+            .attr('stroke-width', 2)
+            .attr('stroke-linecap', 'round')
+            .attr('stroke-linejoin', 'round');
         }
-      }
+      });
     });
 
-    // Add labels
-    const labelGroup = container.append('g').attr('class', 'labels');
-    const labels = labelGroup.selectAll('text')
-      .data(simNodes)
-      .join('text')
-      .attr('font-size', '12px')
-      .attr('font-weight', '500')
-      .attr('fill', '#1e293b')
-      .attr('text-anchor', 'middle')
-      .attr('dy', d => NODE_SIZE[d.type] + 20)
-      .attr('pointer-events', 'none')
-      .text(d => {
-        const maxLen = 25;
-        return d.label.length > maxLen ? d.label.substring(0, maxLen) + '...' : d.label;
+    // Name labels: up to two short lines under the node
+    labels.each(function (d) {
+      const lines = wrapLabel(d.label);
+      const top = NODE_RADIUS[d.type] + (d.type === 'company' ? HALO_GAP + HALO_WIDTH + 12 : 14);
+      const text = d3
+        .select(this)
+        .append('text')
+        .attr('text-anchor', 'middle')
+        .attr('font-size', '11px')
+        .attr('font-weight', d.type === 'company' ? 600 : 500)
+        .attr('fill', '#1e293b')
+        .attr('stroke', '#ffffff')
+        .attr('stroke-width', 3)
+        .attr('paint-order', 'stroke');
+      lines.forEach((line, i) => {
+        text.append('tspan').attr('x', 0).attr('y', top + i * 13).text(line);
       });
+    });
 
-    // Update positions on tick (only if simulation is running)
     simulation.on('tick', () => {
-      linkElements
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y);
-
-      linkLabels
-        .attr('x', d => (d.source.x + d.target.x) / 2)
-        .attr('y', d => (d.source.y + d.target.y) / 2);
-
-      overlayLineElements
-        .attr('x1', d => d.source.x)
-        .attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x)
-        .attr('y2', d => d.target.y);
-
-      nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
-      labels.attr('x', d => d.x).attr('y', d => d.y);
+      simNodes.forEach((n) => livePositions.current.set(n.id, { x: n.x, y: n.y }));
+      updatePositions();
     });
 
-    // After simulation settles, fix all node positions and save
+    // Once settled, freeze every node where it landed and save in one update
     simulation.on('end', () => {
-      simNodes.forEach(node => {
-        node.fx = node.x;
-        node.fy = node.y;
-
-        // Save to store
-        updateNode(node.id, {
-          x: node.x,
-          y: node.y,
-          fx: node.fx,
-          fy: node.fy,
-        });
+      if (!needsLayout) return;
+      const updates = new Map<string, Partial<GraphNode>>();
+      simNodes.forEach((n) => {
+        n.fx = n.x;
+        n.fy = n.y;
+        updates.set(n.id, { x: n.x, y: n.y, fx: n.x, fy: n.y });
       });
+      updateNodes(updates);
     });
 
-    // Initial position update
-    linkElements
-      .attr('x1', d => d.source.x)
-      .attr('y1', d => d.source.y)
-      .attr('x2', d => d.target.x)
-      .attr('y2', d => d.target.y);
-
-    linkLabels
-      .attr('x', d => (d.source.x + d.target.x) / 2)
-      .attr('y', d => (d.source.y + d.target.y) / 2);
-
-    overlayLineElements
-      .attr('x1', d => d.source.x)
-      .attr('y1', d => d.source.y)
-      .attr('x2', d => d.target.x)
-      .attr('y2', d => d.target.y);
-
-    nodeElements.attr('transform', d => `translate(${d.x},${d.y})`);
-    labels.attr('x', d => d.x).attr('y', d => d.y);
+    updatePositions();
 
     return () => {
-      if (simulationRef.current) {
-        simulationRef.current.stop();
-      }
+      simulation.stop();
     };
-  }, [graphData, dimensions, selectedNode, filters, onNodeClick, updateNode]);
+  }, [graphData, dimensions, selectedNode, filters, onNodeClick, updateNode, updateNodes]);
 
   return (
     <div className="relative w-full h-full bg-white rounded-lg shadow-sm">
-      <svg ref={svgRef} className="w-full h-full" style={{ minHeight: '400px' }} />
+      <svg id={GRAPH_SVG_ID} ref={svgRef} className="w-full h-full" style={{ minHeight: '400px' }} />
 
       {graphData.nodes.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -487,15 +519,21 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
           <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Node Types</h3>
           <div className="space-y-2">
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: NODE_COLOR.company }} />
+              <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: NODE_FILL.company }} />
               <span className="text-xs text-slate-700">Company</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.officer }} />
+              <div
+                className="w-3.5 h-3.5 rounded-full border"
+                style={{ backgroundColor: NODE_FILL.officer, borderColor: NODE_ACCENT.officer }}
+              />
               <span className="text-xs text-slate-700">Officer</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: NODE_COLOR.psc }} />
+              <div
+                className="w-3.5 h-3.5 rounded-full border"
+                style={{ backgroundColor: NODE_FILL.psc, borderColor: NODE_ACCENT.psc }}
+              />
               <span className="text-xs text-slate-700">PSC</span>
             </div>
           </div>
@@ -512,18 +550,19 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
         <div>
           <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Risk (shell analysis)</h3>
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full border-2 border-red-600" style={{ backgroundColor: NODE_COLOR.company }} />
-              <span className="text-xs text-slate-700">High</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full border-2 border-orange-500" style={{ backgroundColor: NODE_COLOR.company }} />
-              <span className="text-xs text-slate-700">Medium</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full border border-slate-300" style={{ backgroundColor: NODE_COLOR.company }} />
-              <span className="text-xs text-slate-700">Low</span>
-            </div>
+            {[
+              { label: 'High', stroke: RISK_COLOR.high, opacity: 1, dash: undefined },
+              { label: 'Medium', stroke: RISK_COLOR.medium, opacity: 1, dash: '3 2' },
+              { label: 'Low', stroke: '#0f172a', opacity: 0.15, dash: undefined },
+            ].map((item) => (
+              <div key={item.label} className="flex items-center gap-2">
+                <svg width="16" height="16" className="flex-shrink-0">
+                  <circle cx="8" cy="8" r="6" fill="none" stroke={item.stroke} strokeOpacity={item.opacity} strokeWidth="2.5" strokeDasharray={item.dash} />
+                  <circle cx="8" cy="8" r="3.5" fill={NODE_FILL.company} />
+                </svg>
+                <span className="text-xs text-slate-700">{item.label}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>

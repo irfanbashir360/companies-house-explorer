@@ -6,6 +6,7 @@ import {
   FileJson,
 } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
+import { GRAPH_SVG_ID } from '../utils/layout';
 
 export const Toolbar: React.FC = () => {
   const { graphData, clearGraph, exportGraph, importGraph } = useGraphStore();
@@ -17,7 +18,7 @@ export const Toolbar: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `companies-house-graph-${Date.now()}.json`;
+    a.download = `tracewire-graph-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -25,7 +26,8 @@ export const Toolbar: React.FC = () => {
   };
 
   const handleExportSVG = () => {
-    const svg = document.querySelector('svg');
+    // Export the graph itself, not the first icon <svg> on the page
+    const svg = document.getElementById(GRAPH_SVG_ID);
     if (!svg) return;
 
     const svgData = new XMLSerializer().serializeToString(svg);
@@ -33,7 +35,7 @@ export const Toolbar: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `companies-house-graph-${Date.now()}.svg`;
+    a.download = `tracewire-graph-${Date.now()}.svg`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

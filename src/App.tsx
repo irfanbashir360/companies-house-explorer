@@ -9,9 +9,11 @@ import { ExplorationPanel } from './components/ExplorationPanel';
 import { RelationshipPanel } from './components/RelationshipPanel';
 import { RelationshipAnalysisPanel } from './components/RelationshipAnalysisPanel';
 import { AnalysisPanel } from './components/AnalysisPanel';
+import { Logo } from './components/Logo';
 import { useGraphStore } from './store/graphStore';
 import { companiesHouseAPI } from './services/companiesHouse';
 import type { GraphNode, GraphLink } from './types';
+import { seedPositionsAround } from './utils/layout';
 import { Loader2, AlertCircle } from 'lucide-react';
 
 function App() {
@@ -41,172 +43,78 @@ function App() {
 
   // Expand a node to show connections
   const handleExpandNode = useCallback(
-    async (node: GraphNode) => {
+    async (staleNode: GraphNode) => {
+      // The caller's copy may be out of date (e.g. the selected node in the
+      // side panel), so read the latest position/expanded state from the store.
+      const node =
+        useGraphStore.getState().graphData.nodes.find((n) => n.id === staleNode.id) ?? staleNode;
       if (node.expanded) return;
 
       setLoading(true);
       setError(null);
 
       try {
-        // Get parent node position (default to center if not set)
-        const parentX = node.x ?? 400;
-        const parentY = node.y ?? 300;
-
-        // Find the graph center (first company node, usually the root)
-        const centerNode = graphData.nodes.find(n => n.type === 'company' && n.x !== undefined);
-        const centerX = centerNode?.x ?? 400;
-        const centerY = centerNode?.y ?? 300;
-
-        // Calculate direction from center to current node (for outward expansion)
-        const dx = parentX - centerX;
-        const dy = parentY - centerY;
-        const distanceFromCenter = Math.sqrt(dx * dx + dy * dy);
-
-        // Normalize direction vector (or use 0 if at center)
-        const dirX = distanceFromCenter > 0 ? dx / distanceFromCenter : 1;
-        const dirY = distanceFromCenter > 0 ? dy / distanceFromCenter : 0;
+        const newNodes: GraphNode[] = [];
+        const newLinks: GraphLink[] = [];
 
         if (node.type === 'company') {
           // Expand company -> show officers and PSCs
           const companyNumber = node.data?.company_number || node.id.replace('company-', '');
           const relations = await companiesHouseAPI.getCompanyRelations(companyNumber);
 
-          const newNodes: GraphNode[] = [];
-          const newLinks: GraphLink[] = [];
-
-          // Collect all items to calculate positions
-          const allItems: Array<{ type: 'officer' | 'psc'; data: any }> = [];
-
-          if (relations.officers?.items) {
-            relations.officers.items.forEach((officer: any) => {
-              allItems.push({ type: 'officer', data: officer });
+          (relations.officers?.items ?? []).forEach((officer: any, index: number) => {
+            const officerId =
+              officer.links?.officer?.appointments?.split('/').slice(-2)[0] ||
+              `${companyNumber}-officer-${index}`;
+            const officerNode: GraphNode = {
+              id: `officer-${officerId}`,
+              label: officer.name,
+              type: 'officer',
+              data: officer,
+              expanded: false,
+            };
+            newNodes.push(officerNode);
+            newLinks.push({
+              source: node.id,
+              target: officerNode.id,
+              type: 'officer',
+              label: officer.officer_role,
             });
-          }
-
-          if (relations.pscs?.items) {
-            relations.pscs.items.forEach((psc: any) => {
-              allItems.push({ type: 'psc', data: psc });
-            });
-          }
-
-          // Calculate dynamic radius based on number of nodes
-          const totalCount = allItems.length;
-          const minSpacing = 100; // Minimum pixels between node centers
-          const minRadius = 200; // Minimum radius
-          // Calculate radius: circumference = 2πr, we need totalCount * minSpacing
-          const calculatedRadius = (totalCount * minSpacing) / (2 * Math.PI);
-          const radius = Math.max(minRadius, calculatedRadius);
-
-          // Offset circle center outward from graph center
-          const outwardOffset = radius * 0.5; // Push circle center outward
-          const circleCenterX = parentX + dirX * outwardOffset;
-          const circleCenterY = parentY + dirY * outwardOffset;
-
-          // Calculate radial positions around the offset center
-          allItems.forEach((item, index) => {
-            const angle = (index / totalCount) * 2 * Math.PI;
-            const x = circleCenterX + radius * Math.cos(angle);
-            const y = circleCenterY + radius * Math.sin(angle);
-
-            if (item.type === 'officer') {
-              const officer = item.data;
-              const officerId = officer.links?.officer?.appointments?.split('/').slice(-2)[0] || `${companyNumber}-officer-${index}`;
-
-              const officerNode: GraphNode = {
-                id: `officer-${officerId}`,
-                label: officer.name,
-                type: 'officer',
-                data: officer,
-                expanded: false,
-                x,
-                y,
-                fx: x,
-                fy: y,
-              };
-
-              newNodes.push(officerNode);
-              newLinks.push({
-                source: node.id,
-                target: officerNode.id,
-                type: 'officer',
-                label: officer.officer_role,
-              });
-            } else if (item.type === 'psc') {
-              const psc = item.data;
-              const pscNode: GraphNode = {
-                id: `psc-${companyNumber}-${index}`,
-                label: psc.name,
-                type: 'psc',
-                data: psc,
-                expanded: false,
-                x,
-                y,
-                fx: x,
-                fy: y,
-              };
-
-              newNodes.push(pscNode);
-              newLinks.push({
-                source: node.id,
-                target: pscNode.id,
-                type: 'psc',
-                label: 'PSC',
-              });
-            }
           });
 
-          addNodes(newNodes);
-          addLinks(newLinks);
-          updateNode(node.id, { expanded: true });
-
+          (relations.pscs?.items ?? []).forEach((psc: any, index: number) => {
+            const pscNode: GraphNode = {
+              id: `psc-${companyNumber}-${index}`,
+              label: psc.name,
+              type: 'psc',
+              data: psc,
+              expanded: false,
+            };
+            newNodes.push(pscNode);
+            newLinks.push({
+              source: node.id,
+              target: pscNode.id,
+              type: 'psc',
+              label: 'PSC',
+            });
+          });
         } else if (node.type === 'officer') {
-          // Expand officer -> show their companies
+          // Expand officer -> show their active companies
           const officerId = node.id.replace('officer-', '');
           const appointmentsData = await companiesHouseAPI.getOfficerAppointments(officerId);
 
-          const newNodes: GraphNode[] = [];
-          const newLinks: GraphLink[] = [];
-
-          if (appointmentsData.items) {
-            // Add active appointments
-            const activeAppointments = appointmentsData.items
-              .filter((app: any) => !app.resigned_on)
-              .slice(0, 15);
-
-            // Calculate dynamic radius based on number of nodes
-            const totalCount = activeAppointments.length;
-            const minSpacing = 100; // Minimum pixels between node centers
-            const minRadius = 200; // Minimum radius
-            const calculatedRadius = (totalCount * minSpacing) / (2 * Math.PI);
-            const radius = Math.max(minRadius, calculatedRadius);
-
-            // Offset circle center outward from graph center
-            const outwardOffset = radius * 0.5; // Push circle center outward
-            const circleCenterX = parentX + dirX * outwardOffset;
-            const circleCenterY = parentY + dirY * outwardOffset;
-
-            // Calculate radial positions around the offset center
-            activeAppointments.forEach((appointment: any, index: number) => {
-              if (!appointment.appointed_to) return;
-
-              const angle = (index / totalCount) * 2 * Math.PI;
-              const x = circleCenterX + radius * Math.cos(angle);
-              const y = circleCenterY + radius * Math.sin(angle);
-
+          (appointmentsData.items ?? [])
+            .filter((app: any) => !app.resigned_on && app.appointed_to)
+            .slice(0, 15)
+            .forEach((appointment: any) => {
               const companyId = `company-${appointment.appointed_to.company_number}`;
-
               newNodes.push({
                 id: companyId,
                 label: appointment.appointed_to.company_name,
                 type: 'company',
                 data: appointment.appointed_to,
                 expanded: false,
-                x,
-                y,
-                fx: x,
-                fy: y,
               });
-
               newLinks.push({
                 source: node.id,
                 target: companyId,
@@ -214,12 +122,27 @@ function App() {
                 label: appointment.officer_role,
               });
             });
-          }
-
-          addNodes(newNodes);
-          addLinks(newLinks);
-          updateNode(node.id, { expanded: true });
         }
+
+        // Seed only genuinely new nodes next to the parent, facing away from
+        // where we came from. They are left unpinned so the force layout in
+        // NetworkGraph can relax them into a cluster without overlaps.
+        const graphNow = useGraphStore.getState().graphData;
+        const existingIds = new Set(graphNow.nodes.map((n) => n.id));
+        const unique = newNodes.filter(
+          (n, i) => !existingIds.has(n.id) && newNodes.findIndex((m) => m.id === n.id) === i
+        );
+        const seeds = seedPositionsAround(node, graphNow, unique.length);
+        unique.forEach((n, i) => {
+          n.x = seeds[i].x;
+          n.y = seeds[i].y;
+          n.fx = null;
+          n.fy = null;
+        });
+
+        addNodes(unique);
+        addLinks(newLinks);
+        updateNode(node.id, { expanded: true });
       } catch (err: any) {
         console.error('Error expanding node:', err);
         setError('Failed to expand node');
@@ -227,7 +150,7 @@ function App() {
         setLoading(false);
       }
     },
-    [addNodes, addLinks, updateNode, graphData.nodes]
+    [addNodes, addLinks, updateNode]
   );
 
   // Search for and add a company
@@ -254,6 +177,7 @@ function App() {
           y: 300,
           fx: 400,
           fy: 300,
+          pinned: true,
         };
 
         addNode(companyNode);
@@ -300,6 +224,7 @@ function App() {
           y: 300,
           fx: 400,
           fy: 300,
+          pinned: true,
         };
 
         addNode(officerNode);
@@ -407,13 +332,17 @@ function App() {
       <header className="relative z-50 bg-white border-b border-slate-200 shadow-sm">
         <div className="px-8 py-5">
           <div className="flex items-center justify-between mb-5">
-            <div>
-              <h1 className="text-2xl font-semibold text-slate-900">
-                Companies House Explorer
-              </h1>
-              <p className="text-sm text-slate-500 mt-1">
-                Explore company structures, officers, and ownership networks
-              </p>
+            <div className="flex items-center gap-4">
+              <Logo size={44} className="flex-shrink-0" />
+              <div>
+                <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
+                  Tracewire
+                </h1>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  Explore company structures, officers, and ownership networks
+                  <span className="text-slate-400"> · Data from Companies House</span>
+                </p>
+              </div>
             </div>
             <Toolbar />
           </div>

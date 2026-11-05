@@ -11,6 +11,9 @@ export interface GraphNode {
   y?: number;
   fx?: number | null;
   fy?: number | null;
+  // True when the user dragged the node (or it is the starting node): the
+  // layout never moves pinned nodes. Unpinned nodes may shift to make room.
+  pinned?: boolean;
 }
 
 export interface GraphLink {

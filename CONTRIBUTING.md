@@ -1,4 +1,4 @@
-# Contributing to Companies House Explorer
+# Contributing to Tracewire
 
 Thanks for your interest in improving this project.
 

@@ -32,6 +32,7 @@ interface GraphStore {
   addLinks: (links: GraphLink[]) => void;
   removeNode: (nodeId: string) => void;
   updateNode: (nodeId: string, updates: Partial<GraphNode>) => void;
+  updateNodes: (updates: Map<string, Partial<GraphNode>>) => void;
   setSelectedNode: (node: GraphNode | null) => void;
   clearGraph: () => void;
   setGraphData: (data: GraphData) => void;
@@ -164,6 +165,21 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
         nodes: graphData.nodes.map((n) =>
           n.id === nodeId ? { ...n, ...updates } : n
         ),
+        links: graphData.links,
+      },
+    });
+  },
+
+  // Apply many node updates in one store write (one graph re-render)
+  updateNodes: (updates) => {
+    if (updates.size === 0) return;
+    const { graphData } = get();
+    set({
+      graphData: {
+        nodes: graphData.nodes.map((n) => {
+          const u = updates.get(n.id);
+          return u ? { ...n, ...u } : n;
+        }),
         links: graphData.links,
       },
     });

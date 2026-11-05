@@ -37,3 +37,6 @@ dist-ssr
 BasicCompanyData-*.csv
 cleaned_*.parquet
 report*.json
+
+# Brainstorming mockups
+.superpowers/
