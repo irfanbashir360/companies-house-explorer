@@ -6,6 +6,53 @@ export const GRAPH_SVG_ID = 'network-graph';
 const linkEnd = (end: string | GraphNode) => (typeof end === 'string' ? end : end.id);
 
 /**
+ * Shortest chain of links from `fromId` to `toId` (breadth-first search).
+ * Returns the node ids and link keys ("a|b", both directions) on the path,
+ * or null when the two nodes aren't connected.
+ */
+export function findPath(
+  graphData: GraphData,
+  fromId: string,
+  toId: string
+): { nodes: Set<string>; links: Set<string> } | null {
+  const adjacency = new Map<string, string[]>();
+  graphData.links.forEach((l) => {
+    const s = linkEnd(l.source);
+    const t = linkEnd(l.target);
+    if (!adjacency.has(s)) adjacency.set(s, []);
+    if (!adjacency.has(t)) adjacency.set(t, []);
+    adjacency.get(s)!.push(t);
+    adjacency.get(t)!.push(s);
+  });
+
+  const previous = new Map<string, string | null>([[fromId, null]]);
+  const queue = [fromId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (current === toId) break;
+    for (const next of adjacency.get(current) ?? []) {
+      if (!previous.has(next)) {
+        previous.set(next, current);
+        queue.push(next);
+      }
+    }
+  }
+  if (!previous.has(toId)) return null;
+
+  const nodes = new Set<string>();
+  const links = new Set<string>();
+  for (let at: string | null = toId; at !== null; at = previous.get(at) ?? null) {
+    nodes.add(at);
+    const before = previous.get(at);
+    if (before) {
+      links.add(`${before}|${at}`);
+      links.add(`${at}|${before}`);
+    }
+  }
+  return { nodes, links };
+}
+
+/**
  * Starting positions for `count` new nodes that are about to be attached to
  * `parent`. They are laid out in rings on the side of the parent that faces
  * away from its existing neighbours, so a freshly explored cluster grows

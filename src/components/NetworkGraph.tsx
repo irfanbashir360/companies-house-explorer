@@ -3,8 +3,9 @@ import * as d3 from 'd3';
 import type { GraphNode, GraphLink, NodeType } from '../types';
 import { useGraphStore } from '../store/graphStore';
 import { analyzeNetwork, type ShellCompanyAnalysis } from '../utils/networkAnalysis';
-import { GRAPH_SVG_ID } from '../utils/layout';
-import { Building2 } from 'lucide-react';
+import { GRAPH_SVG_ID, findPath } from '../utils/layout';
+import { Maximize2 } from 'lucide-react';
+import { COLOR, NODE_ACCENT, NODE_BORDER, NODE_FILL, RISK_COLOR } from '../theme';
 
 interface NetworkGraphProps {
   onNodeClick: (node: GraphNode) => void;
@@ -40,32 +41,6 @@ const NODE_RADIUS: Record<NodeType, number> = {
   establishment: 24,
 };
 
-// Fill / icon colours ("refined circles": companies solid, people soft-tinted)
-const NODE_FILL: Record<NodeType, string> = {
-  company: '#0f172a',
-  officer: '#f3e8ff',
-  psc: '#fce7f3',
-  charge: '#fef3c7',
-  filing: '#d1fae5',
-  establishment: '#cffafe',
-};
-const NODE_ACCENT: Record<NodeType, string> = {
-  company: '#ffffff',
-  officer: '#9333ea',
-  psc: '#ec4899',
-  charge: '#f59e0b',
-  filing: '#10b981',
-  establishment: '#06b6d4',
-};
-const NODE_BORDER: Partial<Record<NodeType, string>> = {
-  officer: '#d8b4fe',
-  psc: '#f9a8d4',
-  charge: '#fcd34d',
-  filing: '#6ee7b7',
-  establishment: '#67e8f9',
-};
-
-const RISK_COLOR = { high: '#dc2626', medium: '#ea580c' } as const;
 const HALO_GAP = 6;
 const HALO_WIDTH = 5;
 
@@ -123,7 +98,19 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
   // Latest on-screen positions, so a layout interrupted by a new expansion
   // carries on from where nodes actually are rather than jumping back.
   const livePositions = useRef(new Map<string, { x: number; y: number }>());
-  const { graphData, selectedNode, filters, updateNode, updateNodes } = useGraphStore();
+  // Current element selections, so hovering a Trail step can restyle without a full redraw
+  const selectionsRef = useRef<{
+    nodes: d3.Selection<SVGGElement, SimulationNode, SVGGElement, unknown>;
+    labels: d3.Selection<SVGGElement, SimulationNode, SVGGElement, unknown>;
+    links: d3.Selection<SVGLineElement, SimulationLink, SVGGElement, unknown>;
+    linkLabels: d3.Selection<SVGTextElement, SimulationLink, SVGGElement, unknown>;
+    overlay: d3.Selection<SVGLineElement, OverlayLink, SVGGElement, unknown>;
+  } | null>(null);
+  // Zooms the view so the whole network fits; set by the render effect
+  const fitRef = useRef<(animate: boolean) => void>(() => {});
+  // Set when a layout settles off-screen: the redraw that follows zooms to fit
+  const pendingFitRef = useRef(false);
+  const { graphData, selectedNode, filters, updateNode, updateNodes, trail, highlightId } = useGraphStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   // Forget positions when the graph is cleared (subscribe fires synchronously,
@@ -136,19 +123,15 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     []
   );
 
-  // Update dimensions
+  // Track the canvas size (it changes when the details panel opens or closes, not only on window resize)
   useEffect(() => {
-    const updateDimensions = () => {
-      if (svgRef.current?.parentElement) {
-        setDimensions({
-          width: svgRef.current.parentElement.clientWidth,
-          height: svgRef.current.parentElement.clientHeight,
-        });
-      }
-    };
-    updateDimensions();
-    window.addEventListener('resize', updateDimensions);
-    return () => window.removeEventListener('resize', updateDimensions);
+    const parent = svgRef.current?.parentElement;
+    if (!parent) return;
+    const update = () => setDimensions({ width: parent.clientWidth, height: parent.clientHeight });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(parent);
+    return () => observer.disconnect();
   }, []);
 
   // Render graph
@@ -162,6 +145,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     const { nodes, links } = graphData;
 
     if (nodes.length === 0) {
+      selectionsRef.current = null;
       return;
     }
 
@@ -240,6 +224,32 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
     svg.call(zoom);
     svg.call(zoom.transform, transformRef.current);
 
+    const fit = (animate: boolean) => {
+      if (simNodes.length === 0) return;
+      // Generous padding; extra on the right and bottom where the key and stats sit
+      const xs = simNodes.map((n) => n.x);
+      const ys = simNodes.map((n) => n.y);
+      const minX = Math.min(...xs) - 70, maxX = Math.max(...xs) + 150;
+      const minY = Math.min(...ys) - 70, maxY = Math.max(...ys) + 110;
+      const k = Math.min(1.2, width / (maxX - minX), height / (maxY - minY));
+      const t = d3.zoomIdentity
+        .translate(width / 2, height / 2)
+        .scale(k)
+        .translate(-(minX + maxX) / 2, -(minY + maxY) / 2);
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      if (animate && !reduce) svg.transition().duration(450).call(zoom.transform, t);
+      else svg.call(zoom.transform, t);
+    };
+    fitRef.current = fit;
+    // Is any node outside the visible area at the current zoom?
+    const outOfView = () => {
+      const t = transformRef.current;
+      return simNodes.some((n) => {
+        const [x, y] = t.apply([n.x, n.y]);
+        return x < 30 || y < 30 || x > width - 30 || y > height - 30;
+      });
+    };
+
     if (simulationRef.current) {
       simulationRef.current.stop();
     }
@@ -289,10 +299,10 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .selectAll<SVGLineElement, OverlayLink>('line')
       .data(overlayLinkData)
       .join('line')
-      .attr('stroke', '#dc2626')
-      .attr('stroke-width', 2)
-      .attr('stroke-dasharray', '6 4')
-      .attr('stroke-opacity', 0.7);
+      .attr('stroke', COLOR.alert)
+      .attr('stroke-width', 1.2)
+      .attr('stroke-dasharray', '5 4')
+      .attr('stroke-opacity', 0.4);
 
     // Links
     const linkElements = container
@@ -301,7 +311,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .selectAll<SVGLineElement, SimulationLink>('line')
       .data(simLinks)
       .join('line')
-      .attr('stroke', '#cbd5e1')
+      .attr('stroke', COLOR.linkGrey)
       .attr('stroke-width', 1.5)
       .attr('stroke-opacity', 0.8);
 
@@ -313,7 +323,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .data(simLinks)
       .join('text')
       .attr('font-size', '9px')
-      .attr('fill', '#94a3b8')
+      .attr('fill', COLOR.muted)
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
       .attr('stroke', '#ffffff')
@@ -403,8 +413,8 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .append('circle')
       .attr('r', (d) => NODE_RADIUS[d.type] + (d.type === 'company' ? HALO_GAP + HALO_WIDTH + 4 : 6))
       .attr('fill', 'none')
-      .attr('stroke', '#0f172a')
-      .attr('stroke-width', 2);
+      .attr('stroke', COLOR.nexis)
+      .attr('stroke-width', 2.5);
 
     // Company halo: faint for low risk, solid red for high, dashed orange for medium
     nodeElements
@@ -414,7 +424,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
       .attr('fill', 'none')
       .attr('stroke', (d) => {
         const level = riskLevel(d);
-        return level === 'high' || level === 'medium' ? RISK_COLOR[level] : '#0f172a';
+        return level === 'high' || level === 'medium' ? RISK_COLOR[level] : COLOR.ink;
       })
       .attr('stroke-opacity', (d) => {
         const level = riskLevel(d);
@@ -466,7 +476,7 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
         .attr('text-anchor', 'middle')
         .attr('font-size', '11px')
         .attr('font-weight', d.type === 'company' ? 600 : 500)
-        .attr('fill', '#1e293b')
+        .attr('fill', COLOR.ink)
         .attr('stroke', '#ffffff')
         .attr('stroke-width', 3)
         .attr('paint-order', 'stroke');
@@ -489,83 +499,81 @@ export const NetworkGraph: React.FC<NetworkGraphProps> = ({ onNodeClick }) => {
         n.fy = n.y;
         updates.set(n.id, { x: n.x, y: n.y, fx: n.x, fy: n.y });
       });
+      // Keep the whole network in view after it grows (done by the redraw below)
+      if (outOfView()) pendingFitRef.current = true;
       updateNodes(updates);
     });
 
     updatePositions();
+
+    // Fade smoothly when a Trail step is hovered
+    container.selectAll('.nodes > g, .labels > g, .links line, .link-labels text').style('transition', 'opacity 150ms ease');
+    if (pendingFitRef.current && !needsLayout) {
+      pendingFitRef.current = false;
+      fit(true);
+    }
+
+    selectionsRef.current = { nodes: nodeElements, labels, links: linkElements, linkLabels, overlay: overlayLineElements };
 
     return () => {
       simulation.stop();
     };
   }, [graphData, dimensions, selectedNode, filters, onNodeClick, updateNode, updateNodes]);
 
+  // Trace the wire: when a Trail step is hovered, light up the chain of links
+  // from the starting node to it and fade everything else.
+  useEffect(() => {
+    const sel = selectionsRef.current;
+    if (!sel) return;
+    const path =
+      highlightId && trail[0] ? findPath(graphData, trail[0], highlightId) : null;
+
+    if (!path) {
+      sel.nodes.style('opacity', null);
+      sel.labels.style('opacity', null);
+      sel.linkLabels.style('opacity', null);
+      sel.overlay.style('opacity', null);
+      sel.links
+        .style('opacity', null)
+        .attr('stroke', COLOR.linkGrey)
+        .attr('stroke-width', 1.5);
+      return;
+    }
+
+    const onPath = (l: SimulationLink) => path.links.has(`${l.source.id}|${l.target.id}`);
+    sel.nodes.style('opacity', (d) => (path.nodes.has(d.id) ? 1 : 0.25));
+    sel.labels.style('opacity', (d) => (path.nodes.has(d.id) ? 1 : 0.2));
+    sel.linkLabels.style('opacity', (l) => (onPath(l) ? 1 : 0));
+    sel.overlay.style('opacity', 0.15);
+    sel.links
+      .style('opacity', (l) => (onPath(l) ? 1 : 0.2))
+      .attr('stroke', (l) => (onPath(l) ? COLOR.nexis : COLOR.linkGrey))
+      .attr('stroke-width', (l) => (onPath(l) ? 3 : 1.5));
+    // Draw the traced links above the rest
+    sel.links.filter(onPath).raise();
+  }, [highlightId, trail, graphData, selectedNode, filters, dimensions]);
+
   return (
-    <div className="relative w-full h-full bg-white rounded-lg shadow-sm">
-      <svg id={GRAPH_SVG_ID} ref={svgRef} className="w-full h-full" style={{ minHeight: '400px' }} />
-
-      {graphData.nodes.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center text-slate-400">
-            <Building2 className="w-16 h-16 mx-auto mb-4 opacity-40" />
-            <p className="text-lg font-semibold text-slate-600">Start Exploring</p>
-            <p className="text-sm mt-2 text-slate-500">Search for a company or person above</p>
-          </div>
-        </div>
+    <>
+      <svg
+        id={GRAPH_SVG_ID}
+        ref={svgRef}
+        className="w-full h-full block"
+        style={{ minHeight: '400px' }}
+        role="img"
+        aria-label="Network of companies and the people connected to them"
+      />
+      {graphData.nodes.length > 0 && (
+        <button
+          type="button"
+          onClick={() => fitRef.current(true)}
+          title="Fit to screen"
+          aria-label="Fit network to screen"
+          className="absolute top-4 right-4 h-9 w-9 inline-flex items-center justify-center rounded-md bg-white border border-line text-muted hover:text-ink shadow-sm"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
       )}
-
-      {/* Legend */}
-      <div className="absolute bottom-6 right-6 bg-white p-4 rounded-xl shadow-xl border border-slate-200 space-y-4">
-        <div>
-          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Node Types</h3>
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <div className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: NODE_FILL.company }} />
-              <span className="text-xs text-slate-700">Company</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div
-                className="w-3.5 h-3.5 rounded-full border"
-                style={{ backgroundColor: NODE_FILL.officer, borderColor: NODE_ACCENT.officer }}
-              />
-              <span className="text-xs text-slate-700">Officer</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div
-                className="w-3.5 h-3.5 rounded-full border"
-                style={{ backgroundColor: NODE_FILL.psc, borderColor: NODE_ACCENT.psc }}
-              />
-              <span className="text-xs text-slate-700">PSC</span>
-            </div>
-          </div>
-        </div>
-        <div>
-          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Relationships</h3>
-          <div className="flex items-center gap-2">
-            <svg width="24" height="4" className="flex-shrink-0">
-              <line x1="0" y1="2" x2="24" y2="2" stroke="#dc2626" strokeWidth="2" strokeDasharray="4 3" strokeOpacity="0.8" />
-            </svg>
-            <span className="text-xs text-slate-700">Shared officers</span>
-          </div>
-        </div>
-        <div>
-          <h3 className="text-xs font-semibold mb-3 text-slate-700 uppercase">Risk (shell analysis)</h3>
-          <div className="space-y-2">
-            {[
-              { label: 'High', stroke: RISK_COLOR.high, opacity: 1, dash: undefined },
-              { label: 'Medium', stroke: RISK_COLOR.medium, opacity: 1, dash: '3 2' },
-              { label: 'Low', stroke: '#0f172a', opacity: 0.15, dash: undefined },
-            ].map((item) => (
-              <div key={item.label} className="flex items-center gap-2">
-                <svg width="16" height="16" className="flex-shrink-0">
-                  <circle cx="8" cy="8" r="6" fill="none" stroke={item.stroke} strokeOpacity={item.opacity} strokeWidth="2.5" strokeDasharray={item.dash} />
-                  <circle cx="8" cy="8" r="3.5" fill={NODE_FILL.company} />
-                </svg>
-                <span className="text-xs text-slate-700">{item.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+    </>
   );
 };

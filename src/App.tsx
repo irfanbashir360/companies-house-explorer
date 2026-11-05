@@ -1,14 +1,10 @@
 import { useState, useCallback } from 'react';
 import { NetworkGraph } from './components/NetworkGraph';
 import { SearchBar } from './components/SearchBar';
-import { InfoPanel } from './components/InfoPanel';
-import { FilterPanel } from './components/FilterPanel';
+import { Dossier } from './components/Dossier';
 import { Toolbar } from './components/Toolbar';
-import { SearchHistory } from './components/SearchHistory';
-import { ExplorationPanel } from './components/ExplorationPanel';
-import { RelationshipPanel } from './components/RelationshipPanel';
-import { RelationshipAnalysisPanel } from './components/RelationshipAnalysisPanel';
-import { AnalysisPanel } from './components/AnalysisPanel';
+import { TrailRail } from './components/TrailRail';
+import { GraphKey, GraphStats, EmptyState } from './components/GraphOverlays';
 import { Logo } from './components/Logo';
 import { useGraphStore } from './store/graphStore';
 import { companiesHouseAPI } from './services/companiesHouse';
@@ -26,6 +22,7 @@ function App() {
     updateNode,
     clearGraph,
     addToHistory,
+    addToTrail,
     graphData,
   } = useGraphStore();
 
@@ -143,14 +140,15 @@ function App() {
         addNodes(unique);
         addLinks(newLinks);
         updateNode(node.id, { expanded: true });
+        addToTrail(node.id);
       } catch (err: any) {
         console.error('Error expanding node:', err);
-        setError('Failed to expand node');
+        setError("Couldn't load these connections from Companies House. Try again in a moment.");
       } finally {
         setLoading(false);
       }
     },
-    [addNodes, addLinks, updateNode]
+    [addNodes, addLinks, updateNode, addToTrail]
   );
 
   // Search for and add a company
@@ -181,6 +179,7 @@ function App() {
         };
 
         addNode(companyNode);
+        addToTrail(companyNode.id);
         setSelectedNode(companyNode);
 
         // Add to search history
@@ -196,12 +195,12 @@ function App() {
         });
       } catch (err: any) {
         console.error('Error fetching company:', err);
-        setError('Failed to fetch company data');
+        setError("Couldn't load this company from Companies House. Check the company number and try again.");
       } finally {
         setLoading(false);
       }
     },
-    [clearGraph, addNode, setSelectedNode, addToHistory]
+    [clearGraph, addNode, setSelectedNode, addToHistory, addToTrail]
   );
 
   // Search for and add an officer
@@ -228,6 +227,7 @@ function App() {
         };
 
         addNode(officerNode);
+        addToTrail(officerNode.id);
         setSelectedNode(officerNode);
 
         // Add to search history
@@ -246,12 +246,12 @@ function App() {
         await handleExpandNode(officerNode);
       } catch (err: any) {
         console.error('Error fetching officer:', err);
-        setError('Failed to fetch officer data');
+        setError("Couldn't load this officer from Companies House. Try again in a moment.");
       } finally {
         setLoading(false);
       }
     },
-    [clearGraph, addNode, setSelectedNode, addToHistory, handleExpandNode]
+    [clearGraph, addNode, setSelectedNode, addToHistory, addToTrail, handleExpandNode]
   );
 
   // Explore to depth with delays
@@ -327,97 +327,61 @@ function App() {
   );
 
   return (
-    <div className="h-screen flex flex-col bg-slate-50">
-      {/* Header */}
-      <header className="relative z-50 bg-white border-b border-slate-200 shadow-sm">
-        <div className="px-8 py-5">
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-4">
-              <Logo size={44} className="flex-shrink-0" />
-              <div>
-                <h1 className="text-2xl font-semibold text-slate-900 tracking-tight">
-                  Tracewire
-                </h1>
-                <p className="text-sm text-slate-500 mt-0.5">
-                  Explore company structures, officers, and ownership networks
-                  <span className="text-slate-400"> · Data from Companies House</span>
-                </p>
-              </div>
-            </div>
-            <Toolbar />
-          </div>
-
-          <SearchBar
-            onSelectCompany={handleSelectCompany}
-            onSelectOfficer={handleSelectOfficer}
-          />
+    <div className="h-screen flex flex-col bg-white">
+      <header className="relative z-50 h-14 flex-shrink-0 flex items-center gap-3 lg:gap-6 px-4 lg:px-5 border-b border-line bg-white">
+        <div className="flex items-center gap-2.5 lg:w-[15.5rem] flex-shrink-0">
+          <Logo size={30} />
+          <h1 className="hidden sm:block text-lg font-black text-ink tracking-tight">Tracewire</h1>
+        </div>
+        <div className="flex-1 min-w-0 max-w-2xl">
+          <SearchBar onSelectCompany={handleSelectCompany} onSelectOfficer={handleSelectOfficer} />
+        </div>
+        <div className="ml-auto flex-shrink-0">
+          <Toolbar />
         </div>
       </header>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        <aside className="w-80 bg-slate-50/50 border-r border-slate-200/60 overflow-y-auto scrollbar-thin p-5 space-y-5">
-          <ExplorationPanel
-            onExplore={(depth) => {
-              const companyNode = graphData.nodes.find((n) => n.type === 'company');
-              if (companyNode) {
-                exploreToDepth(companyNode, depth);
-              }
-            }}
-            isExploring={isExploring}
-          />
-          <AnalysisPanel />
-          <RelationshipAnalysisPanel />
-          <RelationshipPanel selectedNode={selectedNode} />
-          <FilterPanel />
-          <SearchHistory
-            onSelectCompany={handleSelectCompany}
-            onSelectOfficer={handleSelectOfficer}
-          />
-        </aside>
+      <div className="flex-1 flex min-h-0 relative">
+        <TrailRail
+          onExplore={(depth) => {
+            const companyNode = graphData.nodes.find((n) => n.type === 'company');
+            if (companyNode) exploreToDepth(companyNode, depth);
+          }}
+          isExploring={isExploring}
+        />
 
-        {/* Graph Area */}
-        <main className="flex-1 p-6 relative bg-white">
+        <main className="flex-1 relative min-w-0 bg-white overflow-hidden">
+          <NetworkGraph onNodeClick={handleNodeClick} />
+
+          {graphData.nodes.length === 0 ? (
+            <EmptyState onSelectCompany={handleSelectCompany} onSelectOfficer={handleSelectOfficer} />
+          ) : (
+            <>
+              <GraphStats />
+              <GraphKey />
+            </>
+          )}
+
           {loading && (
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-10">
-              <div className="flex items-center gap-3 bg-white px-6 py-4 rounded-xl shadow-xl border border-slate-200">
-                <Loader2 className="w-5 h-5 animate-spin text-slate-600" />
-                <span className="text-slate-700 font-medium text-sm">Loading...</span>
-              </div>
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-ink text-white text-sm font-bold px-4 py-2 rounded-full shadow-lg" role="status">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Loading from Companies House
             </div>
           )}
 
           {error && (
-            <div className="absolute top-6 left-1/2 transform -translate-x-1/2 z-10">
-              <div className="flex items-center gap-3 bg-red-50 px-6 py-4 rounded-xl shadow-xl border border-red-200">
-                <AlertCircle className="w-5 h-5 text-red-600" />
-                <div>
-                  <p className="text-red-900 font-semibold text-sm">Error</p>
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-                <button
-                  onClick={() => setError(null)}
-                  className="ml-4 text-red-600 hover:text-red-700"
-                >
-                  Dismiss
-                </button>
-              </div>
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 max-w-md flex items-start gap-3 bg-white border border-line border-l-[3px] border-l-alert px-4 py-3 rounded-md shadow-lg" role="alert">
+              <AlertCircle className="w-4 h-4 text-alert mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-ink flex-1">{error}</p>
+              <button type="button" onClick={() => setError(null)} className="text-sm font-bold text-muted hover:text-ink">
+                Dismiss
+              </button>
             </div>
           )}
-
-          <NetworkGraph onNodeClick={handleNodeClick} />
         </main>
 
-        {/* Info Panel */}
         {selectedNode && (
-          <aside className="w-96 overflow-hidden">
-            <InfoPanel
-              node={selectedNode}
-              onClose={() => setSelectedNode(null)}
-              onExpand={handleExpandNode}
-            />
-          </aside>
+          <Dossier node={selectedNode} onClose={() => setSelectedNode(null)} onExpand={handleExpandNode} />
         )}
       </div>
     </div>

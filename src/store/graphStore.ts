@@ -25,6 +25,11 @@ interface GraphStore {
   // Loading state
   loading: boolean;
 
+  // Trail: ids of the starting node and every node explored, in order
+  trail: string[];
+  // Node whose path from the start is highlighted (hovering a Trail step)
+  highlightId: string | null;
+
   // Actions
   addNode: (node: GraphNode) => void;
   addNodes: (nodes: GraphNode[]) => void;
@@ -34,6 +39,8 @@ interface GraphStore {
   updateNode: (nodeId: string, updates: Partial<GraphNode>) => void;
   updateNodes: (updates: Map<string, Partial<GraphNode>>) => void;
   setSelectedNode: (node: GraphNode | null) => void;
+  addToTrail: (nodeId: string) => void;
+  setHighlight: (nodeId: string | null) => void;
   clearGraph: () => void;
   setGraphData: (data: GraphData) => void;
 
@@ -72,6 +79,8 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
   filters: initialFilters,
   searchHistory: [],
   loading: false,
+  trail: [],
+  highlightId: null,
 
   addNode: (node) => {
     const { graphData } = get();
@@ -189,10 +198,21 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
     set({ selectedNode: node });
   },
 
+  addToTrail: (nodeId) => {
+    const { trail } = get();
+    if (!trail.includes(nodeId)) set({ trail: [...trail, nodeId] });
+  },
+
+  setHighlight: (nodeId) => {
+    set({ highlightId: nodeId });
+  },
+
   clearGraph: () => {
     set({
       graphData: { nodes: [], links: [] },
       selectedNode: null,
+      trail: [],
+      highlightId: null,
     });
   },
 
@@ -235,8 +255,13 @@ export const useGraphStore = create<GraphStore>((set, get) => ({
 
   importGraph: (data) => {
     try {
-      const parsed = JSON.parse(data);
-      set({ graphData: parsed });
+      const parsed = JSON.parse(data) as GraphData;
+      // Rebuild the Trail from the saved graph: the pinned start, then explored nodes
+      const start = parsed.nodes.find((n) => n.pinned) ?? parsed.nodes[0];
+      const trail = [start, ...parsed.nodes.filter((n) => n.expanded && n !== start)]
+        .filter(Boolean)
+        .map((n) => n.id);
+      set({ graphData: parsed, trail, selectedNode: null, highlightId: null });
     } catch (error) {
       console.error('Error importing graph:', error);
     }

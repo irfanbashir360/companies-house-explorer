@@ -4,30 +4,33 @@
 
 @layer base {
   * {
-    @apply border-gray-200;
+    @apply border-line;
   }
 
   body {
-    @apply m-0 min-h-screen bg-slate-50 text-slate-900 antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+    @apply m-0 min-h-screen bg-white text-ink antialiased font-sans;
+    font-feature-settings: 'tnum' 0;
+  }
+
+  /* Visible keyboard focus everywhere, never on mouse click */
+  :focus-visible {
+    outline: 2px solid #006EBB;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer utilities {
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
+  .tabular { font-variant-numeric: tabular-nums; }
 
-  .scrollbar-thin::-webkit-scrollbar-track {
-    @apply bg-slate-100;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    @apply bg-slate-300 rounded-full;
-  }
-
-  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    @apply bg-slate-400;
-  }
+  .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+  .scrollbar-thin::-webkit-scrollbar-thumb { @apply bg-line rounded-full; }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover { @apply bg-muted/40; }
 }

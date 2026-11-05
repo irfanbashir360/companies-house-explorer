@@ -94,169 +94,105 @@ export const SearchBar: React.FC<SearchBarProps> = ({
     setShowResults(false);
   };
 
+  const statusClass = (status?: string) =>
+    status === 'active' ? 'text-teal' : status === 'dissolved' ? 'text-muted' : 'text-amber';
+
   return (
-    <div className="relative z-50">
-      <div className="flex gap-3">
-        {/* Search Type Toggle */}
-        <div className="flex bg-white rounded-xl border border-slate-200/60 shadow-sm overflow-hidden">
-          <button
-            onClick={() => setSearchType('company')}
-            className={`flex items-center gap-2 px-4 py-2.5 transition-all duration-200 ${searchType === 'company'
-              ? 'bg-slate-900 text-white'
-              : 'bg-white text-slate-700 hover:bg-slate-50'
+    <div className="relative z-50 w-full">
+      <div className="flex items-center h-10 rounded-lg border border-line bg-white focus-within:border-nexis focus-within:ring-2 focus-within:ring-nexis/15 transition-colors">
+        {/* What to search for */}
+        <div className="flex h-full p-1 gap-0.5" role="radiogroup" aria-label="Search for">
+          {(['company', 'officer'] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="radio"
+              aria-checked={searchType === type}
+              onClick={() => setSearchType(type)}
+              className={`flex items-center gap-1.5 px-2.5 rounded-md text-[13px] font-bold transition-colors ${
+                searchType === type ? 'bg-ink text-white' : 'text-muted hover:text-ink'
               }`}
-          >
-            <Building2 className="w-4 h-4" />
-            <span className="text-sm font-medium">Company</span>
-          </button>
-          <button
-            onClick={() => setSearchType('officer')}
-            className={`flex items-center gap-2 px-4 py-2.5 transition-all duration-200 ${searchType === 'officer'
-              ? 'bg-slate-900 text-white'
-              : 'bg-white text-slate-700 hover:bg-slate-50'
-              }`}
-          >
-            <User className="w-4 h-4" />
-            <span className="text-sm font-medium">Officer</span>
-          </button>
+            >
+              {type === 'company' ? <Building2 className="w-3.5 h-3.5" /> : <User className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{type === 'company' ? 'Company' : 'Officer'}</span>
+              <span className="sr-only sm:hidden">{type === 'company' ? 'Company' : 'Officer'}</span>
+            </button>
+          ))}
         </div>
 
-        {/* Search Input */}
-        <div className="relative flex-1 z-50">
-          <div className="relative">
-            <Search className="absolute left-3.5 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onFocus={() => {
-                if (results.length > 0) {
-                  setShowResults(true);
-                }
-              }}
-              onBlur={(e) => {
-                // Don't hide if clicking on results
-                if (!e.currentTarget.parentElement?.parentElement?.contains(e.relatedTarget as Node)) {
-                  setTimeout(() => setShowResults(false), 200);
-                }
-              }}
-              placeholder={
-                searchType === 'company'
-                  ? 'Search companies by name or number...'
-                  : 'Search officers by name...'
+        <div className="relative flex-1 min-w-0 h-full">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted/70 pointer-events-none" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => {
+              if (results.length > 0) setShowResults(true);
+            }}
+            onBlur={(e) => {
+              // Don't hide if clicking on results
+              if (!e.currentTarget.parentElement?.parentElement?.parentElement?.contains(e.relatedTarget as Node)) {
+                setTimeout(() => setShowResults(false), 200);
               }
-              className="w-full pl-11 pr-11 py-2.5 border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none text-sm bg-white transition-all"
-            />
-            {loading && (
-              <Loader2 className="absolute right-3.5 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400 animate-spin pointer-events-none" />
-            )}
-          </div>
-
-          {/* Results Dropdown */}
-          {showResults && results.length > 0 && (
-            <>
-              {/* Backdrop */}
-              <div
-                className="fixed inset-0 z-[100]"
-                onClick={() => setShowResults(false)}
-              />
-
-              {/* Results */}
-              <div className="absolute z-[110] w-full mt-2 bg-white border border-slate-200 rounded-lg shadow-lg max-h-[28rem] overflow-hidden">
-                <div className="overflow-y-auto scrollbar-thin">
-                  {results.map((result) => (
-                    <button
-                      key={result.id}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                      }}
-                      onClick={() => handleSelect(result)}
-                      className="w-full px-5 py-4 text-left hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition-colors"
-                    >
-                      <div className="flex items-start gap-4">
-                        {/* Simple Icon */}
-                        <div className="mt-0.5 flex-shrink-0">
-                          {result.type === 'company' ? (
-                            <Building2 className="w-5 h-5 text-slate-700" />
-                          ) : (
-                            <User className="w-5 h-5 text-slate-700" />
-                          )}
-                        </div>
-
-                        {/* Content */}
-                        <div className="flex-1 min-w-0">
-                          {/* Title */}
-                          <div className="flex items-start justify-between gap-3 mb-2">
-                            <h3 className="font-semibold text-slate-950 text-base leading-snug">
-                              {result.name || result.id || 'Unknown'}
-                            </h3>
-                            {result.type === 'company' && result.status && (
-                              <span className={`text-xs font-medium px-2 py-0.5 rounded whitespace-nowrap flex-shrink-0 ${result.status === 'active'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : result.status === 'dissolved'
-                                  ? 'bg-slate-100 text-slate-700 border border-slate-200'
-                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                }`}>
-                                {result.status}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Company Details */}
-                          {result.type === 'company' && (
-                            <div className="space-y-1.5">
-                              {result.id && (
-                                <div className="text-sm text-slate-600 font-mono">
-                                  {result.id}
-                                </div>
-                              )}
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
-                                {result.companyType && (
-                                  <span className="capitalize">{result.companyType.replace(/-/g, ' ')}</span>
-                                )}
-                                {result.dateOfCreation && (
-                                  <span>{new Date(result.dateOfCreation).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })}</span>
-                                )}
-                              </div>
-                              {result.subtitle && (
-                                <div className="text-sm text-slate-600 leading-relaxed">
-                                  {result.subtitle}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Officer Details */}
-                          {result.type === 'officer' && (
-                            <div className="space-y-1.5">
-                              {result.subtitle && (
-                                <div className="text-sm text-slate-600 leading-relaxed">
-                                  {result.subtitle}
-                                </div>
-                              )}
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
-                                {result.appointmentCount !== undefined && (
-                                  <span>
-                                    {result.appointmentCount} {result.appointmentCount === 1 ? 'appointment' : 'appointments'}
-                                  </span>
-                                )}
-                                {result.address && (
-                                  <span className="truncate max-w-[300px]">{result.address}</span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+            }}
+            placeholder={
+              searchType === 'company' ? 'Company name or number' : 'Officer name'
+            }
+            aria-label={searchType === 'company' ? 'Search companies' : 'Search officers'}
+            className="w-full h-full pl-8 pr-9 bg-transparent outline-none text-sm text-ink placeholder:text-muted/60"
+          />
+          {loading && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted animate-spin pointer-events-none" />
           )}
         </div>
       </div>
+
+      {/* Results */}
+      {showResults && results.length > 0 && (
+        <>
+          <div className="fixed inset-0 z-[100]" onClick={() => setShowResults(false)} />
+          <ul className="absolute z-[110] w-full mt-1.5 bg-white border border-line rounded-lg shadow-[0_12px_32px_-12px_rgba(0,23,46,0.25)] max-h-[26rem] overflow-y-auto scrollbar-thin py-1">
+            {results.map((result) => (
+              <li key={result.id}>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelect(result)}
+                  className="w-full px-4 py-2.5 text-left hover:bg-canvas focus-visible:bg-canvas transition-colors"
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-bold text-ink text-sm leading-snug">
+                      {result.name || result.id || 'Unnamed'}
+                    </span>
+                    {result.type === 'company' && result.status && (
+                      <span className={`text-xs font-bold capitalize shrink-0 ${statusClass(result.status)}`}>
+                        {result.status}
+                      </span>
+                    )}
+                    {result.type === 'officer' && result.appointmentCount !== undefined && (
+                      <span className="text-xs text-muted shrink-0 tabular">
+                        {result.appointmentCount} {result.appointmentCount === 1 ? 'appointment' : 'appointments'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-0.5 text-xs text-muted flex flex-wrap gap-x-3">
+                    {result.type === 'company' && <span className="tabular">No. {result.id}</span>}
+                    {result.type === 'company' && result.dateOfCreation && (
+                      <span>
+                        Incorporated{' '}
+                        {new Date(result.dateOfCreation).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                    {(result.subtitle || result.address) && (
+                      <span className="truncate max-w-full">{result.type === 'company' ? result.subtitle : result.address}</span>
+                    )}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 };
